@@ -1,0 +1,400 @@
+"""Tests for Zap orchestrator class."""
+
+from unittest.mock import AsyncMock, MagicMock
+
+import pytest
+
+from zap_ai import (
+    AgentNotFoundError,
+    Task,
+    TaskNotFoundError,
+    TaskStatus,
+    Zap,
+    ZapAgent,
+    ZapConfigurationError,
+    ZapNotStartedError,
+)
+
+
+@pytest.fixture
+def mock_temporal_client() -> MagicMock:
+    """Create a mock Temporal client."""
+    client = MagicMock()
+    client.start_workflow = AsyncMock()
+    client.get_workflow_handle = MagicMock()
+    return client
+
+
+@pytest.fixture
+def zap_with_mock_client(sample_agent: ZapAgent, mock_temporal_client: MagicMock) -> Zap:
+    """A Zap instance with a mock Temporal client."""
+    return Zap(agents=[sample_agent], temporal_client=mock_temporal_client)
+
+
+class TestZapCreation:
+    """Test Zap instantiation with valid inputs."""
+
+    def test_single_agent(self, sample_agent: ZapAgent) -> None:
+        """Test creating Zap with a single agent."""
+        zap = Zap(agents=[sample_agent])
+        assert len(zap.agents) == 1
+        assert zap.list_agents() == ["TestAgent"]
+
+    def test_multiple_agents(self, multi_agent_list: list[ZapAgent]) -> None:
+        """Test creating Zap with multiple agents."""
+        zap = Zap(agents=multi_agent_list)
+        assert len(zap.agents) == 3
+
+    def test_default_task_queue(self, sample_agent: ZapAgent) -> None:
+        """Test that default task_queue is 'zap-agents'."""
+        zap = Zap(agents=[sample_agent])
+        assert zap.task_queue == "zap-agents"
+
+    def test_custom_task_queue(self, sample_agent: ZapAgent) -> None:
+        """Test specifying custom task_queue."""
+        zap = Zap(agents=[sample_agent], task_queue="my-queue")
+        assert zap.task_queue == "my-queue"
+
+    def test_temporal_client_defaults_none(self, sample_agent: ZapAgent) -> None:
+        """Test that temporal_client defaults to None."""
+        zap = Zap(agents=[sample_agent])
+        assert zap.temporal_client is None
+
+
+class TestZapDuplicateNameValidation:
+    """Test duplicate agent name detection."""
+
+    def test_duplicate_names_rejected(self) -> None:
+        """Test that duplicate agent names raise ZapConfigurationError."""
+        agents = [
+            ZapAgent(name="Agent", prompt="test1"),
+            ZapAgent(name="Agent", prompt="test2"),
+        ]
+        with pytest.raises(ZapConfigurationError) as exc_info:
+            Zap(agents=agents)
+        assert "Duplicate agent names" in str(exc_info.value)
+        assert "Agent" in str(exc_info.value)
+
+    def test_multiple_duplicates_reported(self) -> None:
+        """Test that multiple duplicates are detected."""
+        agents = [
+            ZapAgent(name="A", prompt="test"),
+            ZapAgent(name="B", prompt="test"),
+            ZapAgent(name="A", prompt="test"),
+            ZapAgent(name="B", prompt="test"),
+        ]
+        with pytest.raises(ZapConfigurationError) as exc_info:
+            Zap(agents=agents)
+        assert "Duplicate agent names" in str(exc_info.value)
+
+
+class TestZapSubAgentValidation:
+    """Test sub-agent reference validation."""
+
+    def test_valid_sub_agent_references(self, agent_with_sub_agents: list[ZapAgent]) -> None:
+        """Test that valid sub-agent references are accepted."""
+        zap = Zap(agents=agent_with_sub_agents)
+        assert len(zap.agents) == 3
+
+    def test_unknown_sub_agent_rejected(self) -> None:
+        """Test that referencing unknown sub-agent raises error."""
+        agents = [
+            ZapAgent(name="Main", prompt="test", sub_agents=["Unknown"]),
+        ]
+        with pytest.raises(ZapConfigurationError) as exc_info:
+            Zap(agents=agents)
+        assert "unknown sub-agent 'Unknown'" in str(exc_info.value)
+
+    def test_self_reference_rejected(self) -> None:
+        """Test that agent cannot reference itself as sub-agent."""
+        agents = [
+            ZapAgent(name="Main", prompt="test", sub_agents=["Main"]),
+        ]
+        with pytest.raises(ZapConfigurationError) as exc_info:
+            Zap(agents=agents)
+        assert "cannot reference itself" in str(exc_info.value)
+
+
+class TestZapCircularDependencyValidation:
+    """Test circular dependency detection."""
+
+    def test_simple_circular_dependency(self) -> None:
+        """Test that A -> B -> A is detected."""
+        agents = [
+            ZapAgent(name="A", prompt="test", sub_agents=["B"]),
+            ZapAgent(name="B", prompt="test", sub_agents=["A"]),
+        ]
+        with pytest.raises(ZapConfigurationError) as exc_info:
+            Zap(agents=agents)
+        assert "Circular dependency" in str(exc_info.value)
+
+    def test_three_node_cycle(self) -> None:
+        """Test that A -> B -> C -> A is detected."""
+        agents = [
+            ZapAgent(name="A", prompt="test", sub_agents=["B"]),
+            ZapAgent(name="B", prompt="test", sub_agents=["C"]),
+            ZapAgent(name="C", prompt="test", sub_agents=["A"]),
+        ]
+        with pytest.raises(ZapConfigurationError) as exc_info:
+            Zap(agents=agents)
+        assert "Circular dependency" in str(exc_info.value)
+
+    def test_chain_without_cycle(self) -> None:
+        """Test that A -> B -> C (no cycle) is valid."""
+        agents = [
+            ZapAgent(name="A", prompt="test", sub_agents=["B"]),
+            ZapAgent(name="B", prompt="test", sub_agents=["C"]),
+            ZapAgent(name="C", prompt="test"),
+        ]
+        zap = Zap(agents=agents)
+        assert len(zap.agents) == 3
+
+    def test_diamond_without_cycle(self) -> None:
+        """Test diamond pattern (A -> B, A -> C, B -> D, C -> D) is valid."""
+        agents = [
+            ZapAgent(name="A", prompt="test", sub_agents=["B", "C"]),
+            ZapAgent(name="B", prompt="test", sub_agents=["D"]),
+            ZapAgent(name="C", prompt="test", sub_agents=["D"]),
+            ZapAgent(name="D", prompt="test"),
+        ]
+        zap = Zap(agents=agents)
+        assert len(zap.agents) == 4
+
+
+class TestZapGetAgent:
+    """Test get_agent method."""
+
+    def test_get_existing_agent(self, zap_instance: Zap) -> None:
+        """Test getting an existing agent."""
+        agent = zap_instance.get_agent("TestAgent")
+        assert agent.name == "TestAgent"
+
+    def test_get_unknown_agent(self, zap_instance: Zap) -> None:
+        """Test that getting unknown agent raises error."""
+        with pytest.raises(AgentNotFoundError) as exc_info:
+            zap_instance.get_agent("Unknown")
+        assert "not found" in str(exc_info.value)
+        assert "Available agents" in str(exc_info.value)
+
+
+class TestZapListAgents:
+    """Test list_agents method."""
+
+    def test_list_agents_single(self, zap_instance: Zap) -> None:
+        """Test listing agents with single agent."""
+        assert zap_instance.list_agents() == ["TestAgent"]
+
+    def test_list_agents_multiple(self, multi_agent_list: list[ZapAgent]) -> None:
+        """Test listing agents with multiple agents."""
+        zap = Zap(agents=multi_agent_list)
+        names = zap.list_agents()
+        assert len(names) == 3
+        assert "MainAgent" in names
+        assert "HelperAgent" in names
+        assert "ReviewerAgent" in names
+
+
+class TestZapStartStop:
+    """Test start and stop methods."""
+
+    @pytest.mark.asyncio
+    async def test_start_sets_started_flag(self, zap_with_mock_client: Zap) -> None:
+        """Test that start() sets the _started flag."""
+        assert zap_with_mock_client._started is False
+        await zap_with_mock_client.start()
+        assert zap_with_mock_client._started is True
+
+    @pytest.mark.asyncio
+    async def test_start_twice_raises_error(self, zap_with_mock_client: Zap) -> None:
+        """Test that calling start() twice raises error."""
+        await zap_with_mock_client.start()
+        with pytest.raises(RuntimeError) as exc_info:
+            await zap_with_mock_client.start()
+        assert "already been started" in str(exc_info.value)
+
+    @pytest.mark.asyncio
+    async def test_stop_clears_started_flag(self, zap_with_mock_client: Zap) -> None:
+        """Test that stop() clears the _started flag."""
+        await zap_with_mock_client.start()
+        assert zap_with_mock_client._started is True
+        await zap_with_mock_client.stop()
+        assert zap_with_mock_client._started is False
+
+    @pytest.mark.asyncio
+    async def test_stop_before_start_is_noop(self, zap_instance: Zap) -> None:
+        """Test that stop() before start() is a no-op."""
+        await zap_instance.stop()  # Should not raise
+        assert zap_instance._started is False
+
+    @pytest.mark.asyncio
+    async def test_start_initializes_tool_registry(self, zap_with_mock_client: Zap) -> None:
+        """Test that start() initializes the tool registry."""
+        assert zap_with_mock_client._tool_registry is None
+        await zap_with_mock_client.start()
+        assert zap_with_mock_client._tool_registry is not None
+
+    @pytest.mark.asyncio
+    async def test_stop_clears_tool_registry(self, zap_with_mock_client: Zap) -> None:
+        """Test that stop() clears the tool registry."""
+        await zap_with_mock_client.start()
+        assert zap_with_mock_client._tool_registry is not None
+        await zap_with_mock_client.stop()
+        assert zap_with_mock_client._tool_registry is None
+
+
+class TestZapExecuteTask:
+    """Test execute_task method."""
+
+    @pytest.mark.asyncio
+    async def test_execute_before_start_raises(self, zap_instance: Zap) -> None:
+        """Test that execute_task before start raises error."""
+        with pytest.raises(ZapNotStartedError) as exc_info:
+            await zap_instance.execute_task(agent_name="TestAgent", task="Hello")
+        assert "not been started" in str(exc_info.value)
+
+    @pytest.mark.asyncio
+    async def test_execute_without_task_raises(self, zap_with_mock_client: Zap) -> None:
+        """Test that execute_task without task raises ValueError."""
+        await zap_with_mock_client.start()
+        with pytest.raises(ValueError) as exc_info:
+            await zap_with_mock_client.execute_task(agent_name="TestAgent")
+        assert "task argument is required" in str(exc_info.value)
+
+    @pytest.mark.asyncio
+    async def test_execute_new_task_without_agent_raises(self, zap_with_mock_client: Zap) -> None:
+        """Test that new task without agent_name raises ValueError."""
+        await zap_with_mock_client.start()
+        with pytest.raises(ValueError) as exc_info:
+            await zap_with_mock_client.execute_task(task="Hello")
+        assert "agent_name is required" in str(exc_info.value)
+
+    @pytest.mark.asyncio
+    async def test_execute_unknown_agent_raises(self, zap_with_mock_client: Zap) -> None:
+        """Test that unknown agent raises AgentNotFoundError."""
+        await zap_with_mock_client.start()
+        with pytest.raises(AgentNotFoundError):
+            await zap_with_mock_client.execute_task(agent_name="Unknown", task="Hello")
+
+    @pytest.mark.asyncio
+    async def test_execute_returns_pending_task(self, zap_with_mock_client: Zap) -> None:
+        """Test that execute_task returns a task with PENDING status."""
+        await zap_with_mock_client.start()
+        task = await zap_with_mock_client.execute_task(agent_name="TestAgent", task="Hello")
+        assert isinstance(task, Task)
+        assert task.status == TaskStatus.PENDING
+        assert task.agent_name == "TestAgent"
+
+    @pytest.mark.asyncio
+    async def test_execute_task_id_format(self, zap_with_mock_client: Zap) -> None:
+        """Test that task ID has correct format."""
+        await zap_with_mock_client.start()
+        task = await zap_with_mock_client.execute_task(agent_name="TestAgent", task="Hello")
+        assert task.id.startswith("TestAgent-")
+        # Should have 12 hex chars after the dash
+        parts = task.id.split("-")
+        assert len(parts) == 2
+        assert len(parts[1]) == 12
+
+    @pytest.mark.asyncio
+    async def test_execute_calls_start_workflow(
+        self, zap_with_mock_client: Zap, mock_temporal_client: MagicMock
+    ) -> None:
+        """Test that execute_task calls temporal start_workflow."""
+        await zap_with_mock_client.start()
+        await zap_with_mock_client.execute_task(agent_name="TestAgent", task="Hello")
+
+        mock_temporal_client.start_workflow.assert_called_once()
+        call_kwargs = mock_temporal_client.start_workflow.call_args.kwargs
+        assert call_kwargs["task_queue"] == "zap-agents"
+        assert call_kwargs["id"].startswith("TestAgent-")
+
+    @pytest.mark.asyncio
+    async def test_follow_up_sends_signal(
+        self, zap_with_mock_client: Zap, mock_temporal_client: MagicMock
+    ) -> None:
+        """Test that follow_up sends signal to workflow."""
+        # Set up mock handle
+        mock_handle = AsyncMock()
+        mock_handle.signal = AsyncMock()
+        mock_handle.query = AsyncMock(side_effect=["thinking", []])
+        mock_temporal_client.get_workflow_handle.return_value = mock_handle
+
+        await zap_with_mock_client.start()
+        task = await zap_with_mock_client.execute_task(
+            follow_up_on_task="TestAgent-abc123", task="Follow up"
+        )
+
+        mock_temporal_client.get_workflow_handle.assert_called_with("TestAgent-abc123")
+        mock_handle.signal.assert_called_once()
+        assert task.agent_name == "TestAgent"
+
+    @pytest.mark.asyncio
+    async def test_follow_up_task_not_found_raises(
+        self, zap_with_mock_client: Zap, mock_temporal_client: MagicMock
+    ) -> None:
+        """Test that follow_up on non-existent task raises TaskNotFoundError."""
+        mock_temporal_client.get_workflow_handle.side_effect = Exception("Not found")
+
+        await zap_with_mock_client.start()
+        with pytest.raises(TaskNotFoundError):
+            await zap_with_mock_client.execute_task(
+                follow_up_on_task="nonexistent-123", task="Follow up"
+            )
+
+
+class TestZapGetTask:
+    """Test get_task method."""
+
+    @pytest.mark.asyncio
+    async def test_get_task_before_start_raises(self, zap_instance: Zap) -> None:
+        """Test that get_task before start raises error."""
+        with pytest.raises(ZapNotStartedError):
+            await zap_instance.get_task("some-id")
+
+    @pytest.mark.asyncio
+    async def test_get_task_queries_workflow(
+        self, zap_with_mock_client: Zap, mock_temporal_client: MagicMock
+    ) -> None:
+        """Test that get_task queries the workflow."""
+        # Set up mock handle
+        mock_handle = AsyncMock()
+        mock_handle.query = AsyncMock(
+            side_effect=["completed", "Task result", None, [{"role": "user"}]]
+        )
+        mock_temporal_client.get_workflow_handle.return_value = mock_handle
+
+        await zap_with_mock_client.start()
+        task = await zap_with_mock_client.get_task("TestAgent-abc123")
+
+        assert task.id == "TestAgent-abc123"
+        assert task.agent_name == "TestAgent"
+        assert task.status == TaskStatus.COMPLETED
+        assert task.result == "Task result"
+
+    @pytest.mark.asyncio
+    async def test_get_task_not_found_raises(
+        self, zap_with_mock_client: Zap, mock_temporal_client: MagicMock
+    ) -> None:
+        """Test that get_task raises TaskNotFoundError for unknown task."""
+        mock_temporal_client.get_workflow_handle.side_effect = Exception("Not found")
+
+        await zap_with_mock_client.start()
+        with pytest.raises(TaskNotFoundError):
+            await zap_with_mock_client.get_task("unknown-123")
+
+
+class TestZapCancelTask:
+    """Test cancel_task method."""
+
+    @pytest.mark.asyncio
+    async def test_cancel_task_before_start_raises(self, zap_instance: Zap) -> None:
+        """Test that cancel_task before start raises error."""
+        with pytest.raises(ZapNotStartedError):
+            await zap_instance.cancel_task("some-id")
+
+    @pytest.mark.asyncio
+    async def test_cancel_task_not_implemented(self, zap_with_mock_client: Zap) -> None:
+        """Test that cancel_task raises NotImplementedError (skeleton)."""
+        await zap_with_mock_client.start()
+        with pytest.raises(NotImplementedError):
+            await zap_with_mock_client.cancel_task("some-id")
