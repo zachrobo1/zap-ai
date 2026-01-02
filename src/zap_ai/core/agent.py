@@ -114,7 +114,7 @@ class ZapAgent(BaseModel):
         """
         if " " in v:
             raise ValueError(
-                f"Agent name cannot contain spaces: '{v}'. " "Use underscores or hyphens instead."
+                f"Agent name cannot contain spaces: '{v}'. Use underscores or hyphens instead."
             )
         if "/" in v:
             raise ValueError(f"Agent name cannot contain forward slashes: '{v}'.")

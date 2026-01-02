@@ -245,8 +245,7 @@ class ToolRegistry:
         """
         if agent_name not in self._agent_tools:
             raise KeyError(
-                f"Agent '{agent_name}' not registered. "
-                f"Available: {list(self._agent_tools.keys())}"
+                f"Agent '{agent_name}' not registered. Available: {list(self._agent_tools.keys())}"
             )
         return self._agent_tools[agent_name].all_tools
 
