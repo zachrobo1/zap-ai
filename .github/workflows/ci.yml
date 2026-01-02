@@ -45,5 +45,39 @@ jobs:
       - name: Install dependencies
         run: uv sync --dev
 
-      - name: Run tests
-        run: uv run pytest tests/
+      - name: Run unit tests
+        run: uv run pytest tests/unit/ -v
+
+  integration-test:
+    name: Integration Test
+    needs: lint
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v4
+
+      - name: Set up Python
+        run: uv python install 3.11
+
+      - name: Install dependencies
+        run: uv sync --dev
+
+      - name: Install Temporal CLI
+        uses: temporalio/setup-temporal@v0
+
+      - name: Start Temporal server
+        run: |
+          temporal server start-dev --headless &
+          for i in {1..30}; do
+            if temporal workflow list --namespace default 2>/dev/null; then
+              echo "Temporal server is ready"
+              break
+            fi
+            echo "Waiting for Temporal server... ($i/30)"
+            sleep 1
+          done
+
+      - name: Run integration tests
+        run: uv run pytest tests/integration/ -v --tb=short
