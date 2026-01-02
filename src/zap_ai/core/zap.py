@@ -203,7 +203,7 @@ class Zap:
         """
         if name not in self._agent_map:
             raise AgentNotFoundError(
-                f"Agent '{name}' not found. " f"Available agents: {sorted(self._agent_map.keys())}"
+                f"Agent '{name}' not found. Available agents: {sorted(self._agent_map.keys())}"
             )
         return self._agent_map[name]
 
