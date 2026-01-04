@@ -23,7 +23,7 @@ Before running any example, you need:
 
 ## Examples
 
-### 1. Simple Agent (`simple_agent.py`)
+### 1. Simple Agent (`simple_agent/`)
 
 A basic single-agent example demonstrating:
 - Creating an agent with MCP tools
@@ -31,10 +31,10 @@ A basic single-agent example demonstrating:
 - Polling for completion
 
 ```bash
-python examples/simple_agent.py
+python examples/simple_agent/main.py
 ```
 
-### 2. Multi-Agent (`multi_agent.py`)
+### 2. Multi-Agent (`multi_agent/`)
 
 A multi-agent example with delegation demonstrating:
 - Multiple specialized agents
@@ -42,34 +42,39 @@ A multi-agent example with delegation demonstrating:
 - Task delegation with `message_agent`
 
 ```bash
-python examples/multi_agent.py
-```
-
-### 3. Tools Server (`tools.py`)
-
-A FastMCP tools server providing:
-- `get_current_time()` - Get current UTC time
-- `calculate()` - Basic arithmetic
-- `search_web()` - Simulated web search
-
-Run as a standalone MCP server:
-```bash
-python examples/tools.py
-```
-
-Or test with FastMCP's dev mode:
-```bash
-fastmcp dev examples/tools.py
+python examples/multi_agent/main.py
 ```
 
 ## Project Structure
 
 ```
 examples/
-├── README.md           # This file
-├── tools.py            # MCP tools server
-├── simple_agent.py     # Single agent example
-└── multi_agent.py      # Multi-agent delegation example
+├── README.md                 # This file
+├── simple_agent/
+│   ├── main.py               # Single agent example
+│   └── tools.py              # MCP tools server
+└── multi_agent/
+    ├── main.py               # Multi-agent delegation example
+    └── tools.py              # MCP tools server
+```
+
+Each example folder is self-contained with its own tools server.
+
+## Tools
+
+Each example includes a `tools.py` FastMCP server providing:
+- `get_current_time()` - Get current UTC time
+- `calculate()` - Basic arithmetic
+- `search_web()` - Simulated web search
+
+Run as a standalone MCP server:
+```bash
+python examples/simple_agent/tools.py
+```
+
+Or test with FastMCP's dev mode:
+```bash
+fastmcp dev examples/simple_agent/tools.py
 ```
 
 ## Customization
