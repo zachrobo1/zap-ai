@@ -8,7 +8,7 @@ This example demonstrates:
 Prerequisites:
 1. Copy .env.example to .env and set ANTHROPIC_API_KEY
 2. Start Temporal server: temporal server start-dev
-3. Run this script: python simple_agent.py
+3. Run this script: python main.py
 
 Note: LiteLLM requires the 'anthropic/' prefix for Claude models.
 """
@@ -25,7 +25,7 @@ from zap_ai import Zap, ZapAgent
 from zap_ai.worker import create_worker
 
 # Load .env from project root
-load_dotenv(Path(__file__).parent.parent / ".env")
+load_dotenv(Path(__file__).parent.parent.parent / ".env")
 
 
 async def main() -> None:

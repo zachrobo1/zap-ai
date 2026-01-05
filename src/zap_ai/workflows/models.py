@@ -21,6 +21,7 @@ class AgentWorkflowInput:
         max_iterations: Maximum agentic loop iterations (default: 50).
         state: Optional serialized state for continue-as-new.
         parent_workflow_id: If this is a child workflow, the parent's ID.
+        parent_trace_context: Parent trace context for sub-agent linking.
     """
 
     agent_name: str
@@ -31,6 +32,7 @@ class AgentWorkflowInput:
     max_iterations: int = 50
     state: dict[str, Any] | None = None
     parent_workflow_id: str | None = None
+    parent_trace_context: dict[str, Any] | None = None
 
 
 @dataclass
@@ -90,12 +92,14 @@ class ConversationState:
         iteration_count: Number of agentic loop iterations completed.
         pending_messages: Messages received via signal while processing.
         sub_agent_conversations: Active sub-agent conversations.
+        trace_context: Trace context for continue-as-new preservation.
     """
 
     messages: list[dict[str, Any]] = field(default_factory=list)
     iteration_count: int = 0
     pending_messages: list[str] = field(default_factory=list)
     sub_agent_conversations: dict[str, SubAgentConversation] = field(default_factory=dict)
+    trace_context: dict[str, Any] | None = None
 
     def to_dict(self) -> dict[str, Any]:
         """Serialize to dict for continue-as-new."""
@@ -112,6 +116,7 @@ class ConversationState:
                 }
                 for k, v in self.sub_agent_conversations.items()
             },
+            "trace_context": self.trace_context,
         }
 
     @classmethod
@@ -130,4 +135,5 @@ class ConversationState:
             iteration_count=data.get("iteration_count", 0),
             pending_messages=data.get("pending_messages", []),
             sub_agent_conversations=sub_convs,
+            trace_context=data.get("trace_context"),
         )

@@ -8,6 +8,7 @@ from uuid import uuid4
 
 from zap_ai.core.agent import ZapAgent
 from zap_ai.core.task import Task, TaskStatus
+from zap_ai.tracing import NoOpTracingProvider, TracingProvider
 
 if TYPE_CHECKING:
     from temporalio.client import Client as TemporalClient
@@ -81,12 +82,14 @@ class Zap:
     agents: list[ZapAgent]
     temporal_client: TemporalClient | None = None
     task_queue: str = "zap-agents"
+    tracing_provider: TracingProvider | None = None
 
     # Internal state (populated after init/start)
     _agent_map: dict[str, ZapAgent] = field(default_factory=dict, init=False, repr=False)
     _started: bool = field(default=False, init=False, repr=False)
     _tool_registry: ToolRegistry | None = field(default=None, init=False, repr=False)
     _owns_temporal_client: bool = field(default=False, init=False, repr=False)
+    _tracing: TracingProvider = field(init=False, repr=False)
 
     def __post_init__(self) -> None:
         """
@@ -97,6 +100,7 @@ class Zap:
         2. Sub-agent reference validation
         3. Circular dependency detection
         4. Builds internal agent lookup map
+        5. Initializes tracing provider
 
         Raises:
             ZapConfigurationError: If any validation fails.
@@ -105,6 +109,9 @@ class Zap:
         self._build_agent_map()
         self._validate_sub_agent_references()
         self._validate_no_circular_dependencies()
+
+        # Initialize tracing (use NoOp if not configured)
+        self._tracing = self.tracing_provider or NoOpTracingProvider()
 
     def _validate_no_duplicate_names(self) -> None:
         """

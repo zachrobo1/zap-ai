@@ -31,6 +31,9 @@ with workflow.unsafe.imports_passed_through():
         get_agent_config_activity,
         tool_execution_activity,
     )
+    from zap_ai.tracing import (
+        TraceContext,
+    )
 
 
 @workflow.defn
@@ -60,6 +63,9 @@ class AgentWorkflow:
 
         # Pending messages from signals
         self._pending_messages: list[str] = []
+
+        # Tracing context (set in run())
+        self._trace_context: TraceContext | None = None
 
     # -------------------------------------------------------------------------
     # Queries
@@ -152,6 +158,9 @@ class AgentWorkflow:
             self._state = ConversationState.from_dict(input.state)
             # Restore pending messages if any
             self._pending_messages = list(self._state.pending_messages)
+            # Restore trace context if any
+            if self._state.trace_context:
+                self._trace_context = TraceContext.from_dict(self._state.trace_context)
         else:
             # Fresh start - add system prompt and initial task
             self._state.messages.append(
@@ -166,6 +175,29 @@ class AgentWorkflow:
                     "content": input.initial_task,
                 }
             )
+
+        # Initialize trace context for new tasks
+        if not self._trace_context:
+            # Check if this is a sub-agent with parent trace context
+            if input.parent_trace_context:
+                self._trace_context = TraceContext.from_dict(input.parent_trace_context)
+            else:
+                # Create new trace context with W3C format IDs
+                # trace_id: 32 lowercase hex chars, span_id: 16 lowercase hex chars
+                workflow_id = workflow.info().workflow_id
+                import hashlib
+
+                # Generate a deterministic trace ID from workflow ID (32 hex chars)
+                trace_id = hashlib.sha256(workflow_id.encode()).hexdigest()[:32]
+                span_id = hashlib.sha256((workflow_id + "-span").encode()).hexdigest()[:16]
+                self._trace_context = TraceContext(
+                    trace_id=trace_id,
+                    span_id=span_id,
+                    provider_data={"workflow_id": workflow_id},
+                )
+
+        # Store trace context in state for continue-as-new
+        self._state.trace_context = self._trace_context.to_dict()
 
         self._status = TaskStatus.THINKING
 
@@ -244,6 +276,7 @@ class AgentWorkflow:
                 model=self._model,
                 messages=self._state.messages,
                 tools=self._tools,
+                trace_context=self._trace_context.to_dict() if self._trace_context else None,
             ),
             start_to_close_timeout=timedelta(seconds=120),
             retry_policy=RetryPolicy(
@@ -321,6 +354,7 @@ class AgentWorkflow:
                 agent_name=self._agent_name,
                 tool_name=tool_name,
                 arguments=arguments,
+                trace_context=self._trace_context.to_dict() if self._trace_context else None,
             ),
             start_to_close_timeout=timedelta(seconds=60),
             retry_policy=RetryPolicy(
@@ -394,7 +428,7 @@ class AgentWorkflow:
             is_active=True,
         )
 
-        # Start child workflow with full agent config
+        # Start child workflow with full agent config and parent trace context
         child_handle = await workflow.start_child_workflow(
             AgentWorkflow.run,
             AgentWorkflowInput(
@@ -405,6 +439,7 @@ class AgentWorkflow:
                 tools=agent_config.tools,
                 max_iterations=agent_config.max_iterations,
                 parent_workflow_id=parent_id,
+                parent_trace_context=self._trace_context.to_dict() if self._trace_context else None,
             ),
             id=conversation_id,
         )
