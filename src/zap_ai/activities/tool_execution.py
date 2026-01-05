@@ -12,6 +12,8 @@ from typing import TYPE_CHECKING, Any
 
 from temporalio import activity
 
+from zap_ai.tracing import ObservationType, TraceContext, get_tracing_provider
+
 if TYPE_CHECKING:
     from zap_ai.mcp import ToolRegistry
 
@@ -45,11 +47,13 @@ class ToolExecutionInput:
         agent_name: Name of the agent executing the tool.
         tool_name: Name of the MCP tool to execute.
         arguments: Arguments to pass to the tool.
+        trace_context: Optional trace context for observability.
     """
 
     agent_name: str
     tool_name: str
     arguments: dict[str, Any] = field(default_factory=dict)
+    trace_context: dict[str, Any] | None = None
 
 
 class ToolExecutionError(Exception):
@@ -110,6 +114,13 @@ async def tool_execution_activity(input: ToolExecutionInput) -> str:
         ToolExecutionError: If tool execution fails.
         RuntimeError: If tool registry is not initialized.
     """
+    tracer = get_tracing_provider()
+    parent_context = None
+
+    # Reconstruct trace context if provided
+    if input.trace_context:
+        parent_context = TraceContext.from_dict(input.trace_context)
+
     activity.logger.info(
         f"Executing tool '{input.tool_name}' for agent '{input.agent_name}' "
         f"with args: {json.dumps(input.arguments)[:200]}"
@@ -131,7 +142,7 @@ async def tool_execution_activity(input: ToolExecutionInput) -> str:
         ) from e
 
     # Execute the tool via FastMCP client
-    try:
+    async def _execute_tool() -> str:
         result = await client.call_tool(input.tool_name, input.arguments)
 
         activity.logger.info(f"Tool '{input.tool_name}' executed successfully")
@@ -140,6 +151,23 @@ async def tool_execution_activity(input: ToolExecutionInput) -> str:
         if isinstance(result, str):
             return result
         return json.dumps(result, default=str)
+
+    try:
+        # Wrap in tool span if we have trace context
+        if parent_context:
+            async with tracer.start_observation(
+                name=f"tool-{input.tool_name}",
+                observation_type=ObservationType.TOOL,
+                parent_context=parent_context,
+                metadata={
+                    "tool_name": input.tool_name,
+                    "agent_name": input.agent_name,
+                },
+                input_data=input.arguments,
+            ):
+                return await _execute_tool()
+        else:
+            return await _execute_tool()
 
     except Exception as e:
         activity.logger.error(f"Tool execution failed: {e}")

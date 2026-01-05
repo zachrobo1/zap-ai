@@ -45,6 +45,22 @@ A multi-agent example with delegation demonstrating:
 python examples/multi_agent/main.py
 ```
 
+### 3. Langfuse Tracing (`langfuse_tracing/`)
+
+Demonstrates observability with Langfuse tracing:
+- Configure Langfuse tracing provider
+- Traces for each task execution
+- LLM inference and tool calls visible in dashboard
+
+**Additional setup:**
+1. Install with Langfuse support: `pip install zap-ai[langfuse]`
+2. Set `LANGFUSE_PUBLIC_KEY` and `LANGFUSE_SECRET_KEY` in `.env`
+3. View traces at https://cloud.langfuse.com
+
+```bash
+python examples/langfuse_tracing/main.py
+```
+
 ## Project Structure
 
 ```
@@ -53,12 +69,14 @@ examples/
 ├── simple_agent/
 │   ├── main.py               # Single agent example
 │   └── tools.py              # MCP tools server
-└── multi_agent/
-    ├── main.py               # Multi-agent delegation example
-    └── tools.py              # MCP tools server
+├── multi_agent/
+│   ├── main.py               # Multi-agent delegation example
+│   └── tools.py              # MCP tools server
+└── langfuse_tracing/
+    └── main.py               # Langfuse observability example
 ```
 
-Each example folder is self-contained with its own tools server.
+The `langfuse_tracing` example reuses tools from `simple_agent`.
 
 ## Tools
 
