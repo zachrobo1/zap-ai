@@ -1,7 +1,7 @@
 """Core Zap models and orchestrator."""
 
 from zap_ai.core.agent import ZapAgent
-from zap_ai.core.task import Task, TaskStatus
+from zap_ai.core.task import ConversationTurn, Task, TaskStatus, ToolCallInfo
 from zap_ai.core.types import DefaultContext, DynamicPrompt, TContext
 from zap_ai.core.zap import (
     AgentNotFoundError,
@@ -16,6 +16,8 @@ __all__ = [
     "ZapAgent",
     "Task",
     "TaskStatus",
+    "ToolCallInfo",
+    "ConversationTurn",
     "ZapConfigurationError",
     "ZapNotStartedError",
     "AgentNotFoundError",

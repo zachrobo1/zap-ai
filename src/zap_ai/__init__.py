@@ -34,12 +34,14 @@ from importlib.metadata import version
 
 from zap_ai.core import (
     AgentNotFoundError,
+    ConversationTurn,
     DefaultContext,
     DynamicPrompt,
     Task,
     TaskNotFoundError,
     TaskStatus,
     TContext,
+    ToolCallInfo,
     Zap,
     ZapAgent,
     ZapConfigurationError,
@@ -54,6 +56,8 @@ __all__ = [
     "ZapAgent",
     "Task",
     "TaskStatus",
+    "ToolCallInfo",
+    "ConversationTurn",
     # Exceptions
     "ZapConfigurationError",
     "ZapNotStartedError",
