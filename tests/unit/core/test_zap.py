@@ -360,8 +360,15 @@ class TestZapGetTask:
         """Test that get_task queries the workflow."""
         # Set up mock handle
         mock_handle = AsyncMock()
+        # Query order: status, result, error, history, sub_agent_conversations
         mock_handle.query = AsyncMock(
-            side_effect=["completed", "Task result", None, [{"role": "user"}]]
+            side_effect=[
+                "completed",
+                "Task result",
+                None,
+                [{"role": "user"}],
+                {},  # empty sub-agent conversations
+            ]
         )
         mock_temporal_client.get_workflow_handle.return_value = mock_handle
 
@@ -372,6 +379,8 @@ class TestZapGetTask:
         assert task.agent_name == "TestAgent"
         assert task.status == TaskStatus.COMPLETED
         assert task.result == "Task result"
+        assert task.sub_tasks == []
+        assert task._task_fetcher is not None
 
     @pytest.mark.asyncio
     async def test_get_task_not_found_raises(

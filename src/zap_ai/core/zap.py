@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import warnings
 from dataclasses import dataclass, field
-from typing import TYPE_CHECKING, Any, Generic
+from typing import TYPE_CHECKING, Any, Awaitable, Callable, Generic
 from uuid import uuid4
 
 from zap_ai.core.agent import ZapAgent
@@ -451,18 +451,33 @@ class Zap(Generic[TContext]):
         except Exception as e:
             raise TaskNotFoundError(f"Task '{task_id}' not found: {e}") from e
 
+    def _create_task_fetcher(self) -> "Callable[[str], Awaitable[Task]]":
+        """Create a task fetcher callback bound to this Zap instance."""
+
+        async def fetcher(task_id: str) -> Task:
+            return await self.get_task(task_id)
+
+        return fetcher
+
     async def get_task(self, task_id: str) -> Task:
         """
         Get the current state of a task.
 
-        Queries the Temporal workflow for current status, result, and
-        conversation history.
+        Queries the Temporal workflow for current status, result,
+        conversation history, and sub-task information.
+
+        The returned Task object includes:
+        - Full conversation history via `task.history`
+        - Sub-task IDs via `task.sub_tasks`
+        - Ability to fetch sub-task Task objects via `await task.get_sub_tasks()`
+        - Convenience methods: `get_text_content()`, `get_tool_calls()`,
+          `get_turn()`, `get_turns()`, `turn_count()`
 
         Args:
             task_id: The task ID returned from execute_task().
 
         Returns:
-            Task object with current state.
+            Task object with current state and conversation access.
 
         Raises:
             ZapNotStartedError: If start() hasn't been called.
@@ -474,6 +489,16 @@ class Zap(Generic[TContext]):
             print(f"Status: {task.status}")
             if task.is_complete():
                 print(f"Result: {task.result}")
+
+            # Access conversation
+            print(task.get_text_content())
+            for tool_call in task.get_tool_calls():
+                print(f"Called: {tool_call.name}")
+
+            # Access sub-tasks
+            sub_tasks = await task.get_sub_tasks()
+            for sub in sub_tasks:
+                print(f"Sub-task: {sub.id}")
             ```
         """
         self._ensure_started()
@@ -489,6 +514,10 @@ class Zap(Generic[TContext]):
             error = await handle.query(AgentWorkflow.get_error)
             history = await handle.query(AgentWorkflow.get_history)
 
+            # Query sub-agent conversations to get sub-task IDs
+            sub_agent_convs = await handle.query(AgentWorkflow.get_sub_agent_conversations)
+            sub_task_ids = [conv["conversation_id"] for conv in sub_agent_convs.values()]
+
             # Parse agent name from task ID
             agent_name = task_id.split("-")[0]
 
@@ -499,6 +528,8 @@ class Zap(Generic[TContext]):
                 result=result,
                 error=error,
                 history=history,
+                sub_tasks=sub_task_ids,
+                _task_fetcher=self._create_task_fetcher(),
             )
 
         except Exception as e:

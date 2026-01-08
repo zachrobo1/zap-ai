@@ -61,6 +61,19 @@ Demonstrates observability with Langfuse tracing:
 python examples/langfuse_tracing/main.py
 ```
 
+### 4. Conversation History Access (`conversation_history/`)
+
+Demonstrates the conversation history inspection API:
+- `get_text_content()` - Extract all text from conversation
+- `get_tool_calls()` - Get tool calls with `ToolCallInfo` objects
+- `get_turns()` / `get_turn(n)` - Navigate conversation by turns
+- `turn_count()` - Get number of conversation turns
+- `get_sub_tasks()` - Fetch sub-task Task objects (multi-agent)
+
+```bash
+python examples/conversation_history/main.py
+```
+
 ## Project Structure
 
 ```
@@ -72,11 +85,13 @@ examples/
 ├── multi_agent/
 │   ├── main.py               # Multi-agent delegation example
 │   └── tools.py              # MCP tools server
-└── langfuse_tracing/
-    └── main.py               # Langfuse observability example
+├── langfuse_tracing/
+│   └── main.py               # Langfuse observability example
+└── conversation_history/
+    └── main.py               # Conversation history inspection example
 ```
 
-The `langfuse_tracing` example reuses tools from `simple_agent`.
+The `langfuse_tracing` and `conversation_history` examples reuse tools from `simple_agent`.
 
 ## Tools
 

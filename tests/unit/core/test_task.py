@@ -2,7 +2,9 @@
 
 from datetime import datetime, timezone
 
-from zap_ai import Task, TaskStatus
+import pytest
+
+from zap_ai import ConversationTurn, Task, TaskStatus, ToolCallInfo
 
 
 class TestTaskStatus:
@@ -273,3 +275,349 @@ class TestTaskToolCallsCounting:
             ],
         )
         assert task.get_tool_calls_count() == 3
+
+
+class TestToolCallInfo:
+    """Test ToolCallInfo dataclass."""
+
+    def test_create_minimal(self) -> None:
+        """Test creating ToolCallInfo with minimal fields."""
+        info = ToolCallInfo(id="call-1", name="search", arguments={"query": "test"})
+        assert info.id == "call-1"
+        assert info.name == "search"
+        assert info.arguments == {"query": "test"}
+        assert info.result is None
+
+    def test_create_with_result(self) -> None:
+        """Test creating ToolCallInfo with result."""
+        info = ToolCallInfo(
+            id="call-1", name="search", arguments={"query": "test"}, result="Found it!"
+        )
+        assert info.result == "Found it!"
+
+
+class TestConversationTurn:
+    """Test ConversationTurn dataclass."""
+
+    def test_create_minimal(self) -> None:
+        """Test creating ConversationTurn with minimal fields."""
+        turn = ConversationTurn(turn_number=0, user_message=None)
+        assert turn.turn_number == 0
+        assert turn.user_message is None
+        assert turn.assistant_messages == []
+        assert turn.tool_messages == []
+
+    def test_create_full(self) -> None:
+        """Test creating ConversationTurn with all fields."""
+        turn = ConversationTurn(
+            turn_number=1,
+            user_message={"role": "user", "content": "Hello"},
+            assistant_messages=[{"role": "assistant", "content": "Hi!"}],
+            tool_messages=[{"role": "tool", "content": "result", "tool_call_id": "1"}],
+        )
+        assert turn.turn_number == 1
+        assert turn.user_message == {"role": "user", "content": "Hello"}
+        assert len(turn.assistant_messages) == 1
+        assert len(turn.tool_messages) == 1
+
+
+class TestTaskTextContent:
+    """Test Task.get_text_content() method."""
+
+    def test_get_text_content_empty(self) -> None:
+        """Test get_text_content with empty history."""
+        task = Task(id="Agent-123", agent_name="Agent")
+        assert task.get_text_content() == ""
+
+    def test_get_text_content_user_only(self) -> None:
+        """Test get_text_content with only user messages."""
+        task = Task(
+            id="Agent-123",
+            agent_name="Agent",
+            history=[
+                {"role": "user", "content": "Hello"},
+                {"role": "user", "content": "World"},
+            ],
+        )
+        assert task.get_text_content() == "Hello\n\nWorld"
+
+    def test_get_text_content_mixed(self) -> None:
+        """Test get_text_content with user and assistant messages."""
+        task = Task(
+            id="Agent-123",
+            agent_name="Agent",
+            history=[
+                {"role": "user", "content": "Hello"},
+                {"role": "assistant", "content": "Hi there!"},
+                {"role": "user", "content": "How are you?"},
+                {"role": "assistant", "content": "I'm doing well!"},
+            ],
+        )
+        assert task.get_text_content() == "Hello\n\nHi there!\n\nHow are you?\n\nI'm doing well!"
+
+    def test_get_text_content_excludes_tools(self) -> None:
+        """Test get_text_content excludes tool messages."""
+        task = Task(
+            id="Agent-123",
+            agent_name="Agent",
+            history=[
+                {"role": "user", "content": "Search for something"},
+                {
+                    "role": "assistant",
+                    "content": None,
+                    "tool_calls": [{"id": "1", "function": {"name": "search"}}],
+                },
+                {"role": "tool", "content": "Search result", "tool_call_id": "1"},
+                {"role": "assistant", "content": "Found it!"},
+            ],
+        )
+        # Only user and assistant text content, no tools
+        assert task.get_text_content() == "Search for something\n\nFound it!"
+
+
+class TestTaskGetToolCalls:
+    """Test Task.get_tool_calls() method."""
+
+    def test_get_tool_calls_empty(self) -> None:
+        """Test get_tool_calls with no tool calls."""
+        task = Task(id="Agent-123", agent_name="Agent")
+        assert task.get_tool_calls() == []
+
+    def test_get_tool_calls_single(self) -> None:
+        """Test get_tool_calls with single tool call."""
+        task = Task(
+            id="Agent-123",
+            agent_name="Agent",
+            history=[
+                {
+                    "role": "assistant",
+                    "content": None,
+                    "tool_calls": [
+                        {
+                            "id": "call-1",
+                            "function": {"name": "search", "arguments": '{"query": "test"}'},
+                        }
+                    ],
+                },
+                {"role": "tool", "content": "Found it!", "tool_call_id": "call-1"},
+            ],
+        )
+        calls = task.get_tool_calls()
+        assert len(calls) == 1
+        assert calls[0].id == "call-1"
+        assert calls[0].name == "search"
+        assert calls[0].arguments == {"query": "test"}
+        assert calls[0].result == "Found it!"
+
+    def test_get_tool_calls_multiple(self) -> None:
+        """Test get_tool_calls with multiple calls."""
+        task = Task(
+            id="Agent-123",
+            agent_name="Agent",
+            history=[
+                {
+                    "role": "assistant",
+                    "content": None,
+                    "tool_calls": [
+                        {"id": "1", "function": {"name": "search", "arguments": "{}"}},
+                        {"id": "2", "function": {"name": "fetch", "arguments": "{}"}},
+                    ],
+                },
+                {"role": "tool", "content": "result1", "tool_call_id": "1"},
+                {"role": "tool", "content": "result2", "tool_call_id": "2"},
+            ],
+        )
+        calls = task.get_tool_calls()
+        assert len(calls) == 2
+        assert calls[0].name == "search"
+        assert calls[0].result == "result1"
+        assert calls[1].name == "fetch"
+        assert calls[1].result == "result2"
+
+    def test_get_tool_calls_without_results(self) -> None:
+        """Test get_tool_calls when tool result is missing."""
+        task = Task(
+            id="Agent-123",
+            agent_name="Agent",
+            history=[
+                {
+                    "role": "assistant",
+                    "content": None,
+                    "tool_calls": [
+                        {"id": "1", "function": {"name": "search", "arguments": "{}"}},
+                    ],
+                },
+                # No tool result message
+            ],
+        )
+        calls = task.get_tool_calls()
+        assert len(calls) == 1
+        assert calls[0].result is None
+
+
+class TestTaskTurns:
+    """Test Task turn-related methods."""
+
+    def test_get_turns_empty(self) -> None:
+        """Test get_turns with empty history."""
+        task = Task(id="Agent-123", agent_name="Agent")
+        assert task.get_turns() == []
+
+    def test_get_turns_single_turn(self) -> None:
+        """Test get_turns with single turn."""
+        task = Task(
+            id="Agent-123",
+            agent_name="Agent",
+            history=[
+                {"role": "user", "content": "Hello"},
+                {"role": "assistant", "content": "Hi!"},
+            ],
+        )
+        turns = task.get_turns()
+        assert len(turns) == 1
+        assert turns[0].turn_number == 0
+        assert turns[0].user_message == {"role": "user", "content": "Hello"}
+        assert len(turns[0].assistant_messages) == 1
+
+    def test_get_turns_multiple_turns(self) -> None:
+        """Test get_turns with multiple turns."""
+        task = Task(
+            id="Agent-123",
+            agent_name="Agent",
+            history=[
+                {"role": "user", "content": "Hello"},
+                {"role": "assistant", "content": "Hi!"},
+                {"role": "user", "content": "How are you?"},
+                {"role": "assistant", "content": "Fine!"},
+            ],
+        )
+        turns = task.get_turns()
+        assert len(turns) == 2
+        assert turns[0].turn_number == 0
+        assert turns[1].turn_number == 1
+
+    def test_get_turns_with_tools(self) -> None:
+        """Test get_turns includes tool messages."""
+        task = Task(
+            id="Agent-123",
+            agent_name="Agent",
+            history=[
+                {"role": "user", "content": "Search"},
+                {
+                    "role": "assistant",
+                    "content": None,
+                    "tool_calls": [{"id": "1", "function": {"name": "search"}}],
+                },
+                {"role": "tool", "content": "result", "tool_call_id": "1"},
+                {"role": "assistant", "content": "Found it!"},
+            ],
+        )
+        turns = task.get_turns()
+        assert len(turns) == 1
+        assert len(turns[0].assistant_messages) == 2
+        assert len(turns[0].tool_messages) == 1
+
+    def test_get_turns_with_system_prompt(self) -> None:
+        """Test get_turns includes system prompt in turn 0."""
+        task = Task(
+            id="Agent-123",
+            agent_name="Agent",
+            history=[
+                {"role": "system", "content": "You are a helpful assistant."},
+                {"role": "user", "content": "Hello"},
+                {"role": "assistant", "content": "Hi!"},
+            ],
+        )
+        turns = task.get_turns()
+        # System prompt should be the user_message for turn 0 if it comes first
+        assert len(turns) == 2
+        assert turns[0].user_message == {
+            "role": "system",
+            "content": "You are a helpful assistant.",
+        }
+        assert turns[1].user_message == {"role": "user", "content": "Hello"}
+
+    def test_get_turn_valid(self) -> None:
+        """Test get_turn returns correct turn."""
+        task = Task(
+            id="Agent-123",
+            agent_name="Agent",
+            history=[
+                {"role": "user", "content": "First"},
+                {"role": "assistant", "content": "Response 1"},
+                {"role": "user", "content": "Second"},
+                {"role": "assistant", "content": "Response 2"},
+            ],
+        )
+        turn = task.get_turn(1)
+        assert turn is not None
+        assert turn.turn_number == 1
+        assert turn.user_message == {"role": "user", "content": "Second"}
+
+    def test_get_turn_invalid(self) -> None:
+        """Test get_turn returns None for invalid turn number."""
+        task = Task(
+            id="Agent-123",
+            agent_name="Agent",
+            history=[{"role": "user", "content": "Hello"}],
+        )
+        assert task.get_turn(5) is None
+        assert task.get_turn(-1) is None
+
+    def test_turn_count(self) -> None:
+        """Test turn_count returns correct count."""
+        task = Task(
+            id="Agent-123",
+            agent_name="Agent",
+            history=[
+                {"role": "user", "content": "First"},
+                {"role": "assistant", "content": "Response 1"},
+                {"role": "user", "content": "Second"},
+                {"role": "assistant", "content": "Response 2"},
+            ],
+        )
+        assert task.turn_count() == 2
+
+
+class TestTaskSubTasks:
+    """Test Task.get_sub_tasks() method."""
+
+    @pytest.mark.asyncio
+    async def test_get_sub_tasks_no_fetcher_raises(self) -> None:
+        """Test get_sub_tasks raises error without fetcher."""
+        task = Task(id="Agent-123", agent_name="Agent", sub_tasks=["Child-1"])
+        with pytest.raises(RuntimeError, match="not created via Zap.get_task"):
+            await task.get_sub_tasks()
+
+    @pytest.mark.asyncio
+    async def test_get_sub_tasks_empty(self) -> None:
+        """Test get_sub_tasks with no sub-tasks."""
+
+        async def mock_fetcher(task_id: str) -> Task:
+            return Task(id=task_id, agent_name="Child")
+
+        task = Task(id="Agent-123", agent_name="Agent", sub_tasks=[], _task_fetcher=mock_fetcher)
+        result = await task.get_sub_tasks()
+        assert result == []
+
+    @pytest.mark.asyncio
+    async def test_get_sub_tasks_fetches_tasks(self) -> None:
+        """Test get_sub_tasks fetches Task objects."""
+        fetched_ids: list[str] = []
+
+        async def mock_fetcher(task_id: str) -> Task:
+            fetched_ids.append(task_id)
+            return Task(id=task_id, agent_name="Child")
+
+        task = Task(
+            id="Agent-123",
+            agent_name="Agent",
+            sub_tasks=["Child-1", "Child-2"],
+            _task_fetcher=mock_fetcher,
+        )
+        result = await task.get_sub_tasks()
+
+        assert len(result) == 2
+        assert result[0].id == "Child-1"
+        assert result[1].id == "Child-2"
+        assert fetched_ids == ["Child-1", "Child-2"]
