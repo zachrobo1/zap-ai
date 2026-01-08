@@ -30,6 +30,8 @@ Example:
     ```
 """
 
+from importlib.metadata import version
+
 from zap_ai.core import (
     AgentNotFoundError,
     Task,
@@ -41,7 +43,7 @@ from zap_ai.core import (
     ZapNotStartedError,
 )
 
-__version__ = "0.1.0"
+__version__ = version("zap-ai")
 
 __all__ = [
     # Main classes
