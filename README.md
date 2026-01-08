@@ -1,5 +1,9 @@
 # Zap - Zach's Agent Platform
 
+[![PyPI version](https://img.shields.io/pypi/v/zap-ai)](https://pypi.org/project/zap-ai/)
+[![Coverage](https://codecov.io/gh/zachrobo1/zap-ai/graph/badge.svg)](https://codecov.io/gh/zachrobo1/zap-ai)
+[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
+
 Zap is an opinionated library for building **resilient AI agents** on top of [Temporal](https://temporal.io/). It provides a scalable, fault-tolerant way to create AI agents that can power demanding use cases and complex architectures.
 
 ## Why Zap?
