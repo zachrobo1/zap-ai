@@ -5,13 +5,17 @@ These tests verify that:
 2. Workflows execute correctly through actual Temporal infrastructure
 3. Queries and signals work against real workflows
 4. Multiple workflows can run concurrently
+5. Context-based dynamic prompts are resolved correctly
 
 Note: LLM and MCP calls are mocked to avoid external dependencies.
 """
 
+from dataclasses import dataclass
+
 import pytest
 from temporalio.client import Client, WorkflowHandle
 
+from zap_ai import Zap, ZapAgent
 from zap_ai.workflows import AgentWorkflow, AgentWorkflowInput
 
 
@@ -149,3 +153,105 @@ class TestTemporalIntegration:
         )
 
         assert result is not None
+
+
+class TestContextIntegration:
+    """Integration tests for context-based dynamic prompts."""
+
+    @pytest.mark.asyncio
+    async def test_dynamic_prompt_resolves_with_context(
+        self,
+        temporal_client: Client,
+        integration_worker,
+        task_queue: str,
+    ) -> None:
+        """Test that dynamic prompts are resolved with context and passed to workflow."""
+
+        @dataclass
+        class UserContext:
+            user_name: str
+            role: str
+
+        def make_prompt(ctx: UserContext) -> str:
+            return f"You are an assistant for {ctx.user_name}, who is a {ctx.role}."
+
+        agent: ZapAgent[UserContext] = ZapAgent(
+            name="ContextAgent",
+            prompt=make_prompt,
+        )
+
+        zap: Zap[UserContext] = Zap(
+            agents=[agent],
+            temporal_client=temporal_client,
+            task_queue=task_queue,
+        )
+        await zap.start()
+
+        try:
+            task = await zap.execute_task(
+                agent_name="ContextAgent",
+                task="Hello, help me with something",
+                context=UserContext(user_name="Alice", role="developer"),
+            )
+
+            # Wait for task to complete
+            result = await zap.get_task(task.id)
+            while not result.status.is_terminal():
+                import asyncio
+
+                await asyncio.sleep(0.1)
+                result = await zap.get_task(task.id)
+
+            # Verify the resolved prompt appears in the conversation history
+            assert result.history is not None
+            system_message = result.history[0]
+            assert system_message["role"] == "system"
+            assert "Alice" in system_message["content"]
+            assert "developer" in system_message["content"]
+            assert (
+                system_message["content"] == "You are an assistant for Alice, who is a developer."
+            )
+        finally:
+            await zap.stop()
+
+    @pytest.mark.asyncio
+    async def test_static_prompt_works_without_context(
+        self,
+        temporal_client: Client,
+        integration_worker,
+        task_queue: str,
+    ) -> None:
+        """Test that static prompts work correctly without context."""
+        agent = ZapAgent(
+            name="StaticAgent",
+            prompt="You are a helpful static assistant.",
+        )
+
+        zap = Zap(
+            agents=[agent],
+            temporal_client=temporal_client,
+            task_queue=task_queue,
+        )
+        await zap.start()
+
+        try:
+            task = await zap.execute_task(
+                agent_name="StaticAgent",
+                task="Hello!",
+            )
+
+            # Wait for task to complete
+            result = await zap.get_task(task.id)
+            while not result.status.is_terminal():
+                import asyncio
+
+                await asyncio.sleep(0.1)
+                result = await zap.get_task(task.id)
+
+            # Verify the static prompt appears in the conversation history
+            assert result.history is not None
+            system_message = result.history[0]
+            assert system_message["role"] == "system"
+            assert system_message["content"] == "You are a helpful static assistant."
+        finally:
+            await zap.stop()

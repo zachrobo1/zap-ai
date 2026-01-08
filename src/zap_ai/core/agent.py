@@ -2,33 +2,47 @@
 
 from __future__ import annotations
 
-from typing import TYPE_CHECKING, Any
+from collections.abc import Callable
+from typing import TYPE_CHECKING, Any, Generic
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator
+
+from zap_ai.core.types import TContext
 
 if TYPE_CHECKING:
     from fastmcp import Client  # noqa: F401
 
 
-class ZapAgent(BaseModel):
+class ZapAgent(BaseModel, Generic[TContext]):
     """
     Configuration for an AI agent within the Zap platform.
 
     ZapAgent defines all the properties needed to run an agent, including
-    its system prompt, LLM model, available tools (via MCP clients), and
-    which other agents it can delegate to.
+    its system prompt (static or dynamic), LLM model, available tools
+    (via MCP clients), and which other agents it can delegate to.
+
+    The prompt can be either:
+    - A static string: "You are a helpful assistant."
+    - A callable that receives context: lambda ctx: f"You assist {ctx['user_name']}."
 
     Example:
         ```python
         from zap_ai import ZapAgent
         from fastmcp import Client
 
+        # Static prompt
         agent = ZapAgent(
             name="ResearchAgent",
             prompt="You are a research assistant...",
             model="gpt-4o",
             mcp_clients=[Client("./tools.py")],
             sub_agents=["WriterAgent"],
+        )
+
+        # Dynamic prompt with context
+        agent = ZapAgent[MyContext](
+            name="PersonalAgent",
+            prompt=lambda ctx: f"You are {ctx.user_name}'s assistant.",
         )
         ```
 
@@ -37,6 +51,7 @@ class ZapAgent(BaseModel):
             Cannot contain spaces or special characters that would be
             invalid in a Temporal workflow ID.
         prompt: System prompt that defines the agent's behavior and personality.
+            Can be a string or a callable that takes context and returns a string.
             This is sent as the first message in every conversation.
         model: LiteLLM model identifier (e.g., "gpt-4o", "claude-3-opus-20240229",
             "anthropic/claude-3-sonnet"). See LiteLLM docs for full list.
@@ -63,10 +78,9 @@ class ZapAgent(BaseModel):
         max_length=100,
         description="Unique identifier for the agent (no spaces allowed)",
     )
-    prompt: str = Field(
+    prompt: str | Callable[[Any], str] = Field(
         ...,
-        min_length=1,
-        description="System prompt defining agent behavior",
+        description="System prompt - static string or callable(context) -> str",
     )
 
     # Optional fields with defaults
@@ -128,6 +142,18 @@ class ZapAgent(BaseModel):
             )
         return v
 
+    @field_validator("prompt")
+    @classmethod
+    def validate_prompt(cls, v: str | Callable[[Any], str]) -> str | Callable[[Any], str]:
+        """Validate prompt - string must be non-empty, callable must be callable."""
+        if isinstance(v, str):
+            if not v:
+                raise ValueError("Prompt string cannot be empty")
+            return v
+        if callable(v):
+            return v
+        raise ValueError("Prompt must be a string or callable")
+
     @field_validator("sub_agents")
     @classmethod
     def validate_sub_agents_no_duplicates(cls, v: list[str]) -> list[str]:
@@ -136,3 +162,24 @@ class ZapAgent(BaseModel):
             duplicates = [name for name in v if v.count(name) > 1]
             raise ValueError(f"Duplicate sub-agent references: {set(duplicates)}")
         return v
+
+    def is_dynamic_prompt(self) -> bool:
+        """Check if this agent uses a dynamic (callable) prompt."""
+        return callable(self.prompt)
+
+    def resolve_prompt(self, context: TContext) -> str:
+        """
+        Resolve the prompt with the given context.
+
+        Args:
+            context: The context to pass to a dynamic prompt.
+
+        Returns:
+            The resolved system prompt string.
+
+        Raises:
+            TypeError: If prompt resolution fails.
+        """
+        if callable(self.prompt):
+            return self.prompt(context)
+        return self.prompt

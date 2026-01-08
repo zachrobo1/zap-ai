@@ -190,3 +190,70 @@ class TestZapAgentSubAgentsValidation:
         """Test that unique sub-agent names are accepted."""
         agent = ZapAgent(name="Main", prompt="test", sub_agents=["Helper", "Reviewer", "Writer"])
         assert len(agent.sub_agents) == 3
+
+
+class TestZapAgentDynamicPrompt:
+    """Test dynamic prompt functionality."""
+
+    def test_static_prompt_is_not_dynamic(self) -> None:
+        """Test that static string prompt is not considered dynamic."""
+        agent = ZapAgent(name="Test", prompt="You are helpful.")
+        assert not agent.is_dynamic_prompt()
+
+    def test_callable_prompt_is_dynamic(self) -> None:
+        """Test that callable prompt is considered dynamic."""
+        agent = ZapAgent(
+            name="Test",
+            prompt=lambda ctx: f"You assist {ctx['name']}.",
+        )
+        assert agent.is_dynamic_prompt()
+
+    def test_resolve_static_prompt(self) -> None:
+        """Test resolving a static prompt returns the string."""
+        agent = ZapAgent(name="Test", prompt="You are helpful.")
+        assert agent.resolve_prompt({}) == "You are helpful."
+        assert agent.resolve_prompt({"key": "value"}) == "You are helpful."
+
+    def test_resolve_callable_prompt_with_dict(self) -> None:
+        """Test resolving a callable prompt with dict context."""
+        agent = ZapAgent(
+            name="Test",
+            prompt=lambda ctx: f"You assist {ctx['name']} from {ctx['company']}.",
+        )
+        result = agent.resolve_prompt({"name": "Alice", "company": "Acme"})
+        assert result == "You assist Alice from Acme."
+
+    def test_resolve_callable_prompt_with_typed_context(self) -> None:
+        """Test resolving a callable prompt with typed context."""
+        from dataclasses import dataclass
+
+        @dataclass
+        class MyContext:
+            user_name: str
+            company: str
+
+        agent: ZapAgent[MyContext] = ZapAgent(
+            name="Test",
+            prompt=lambda ctx: f"You assist {ctx.user_name} from {ctx.company}.",
+        )
+        result = agent.resolve_prompt(MyContext(user_name="Bob", company="TechCo"))
+        assert result == "You assist Bob from TechCo."
+
+    def test_callable_prompt_with_empty_dict_default(self) -> None:
+        """Test callable prompt that handles empty dict gracefully."""
+        agent = ZapAgent(
+            name="Test",
+            prompt=lambda ctx: f"User: {ctx.get('name', 'unknown')}",
+        )
+        assert agent.resolve_prompt({}) == "User: unknown"
+        assert agent.resolve_prompt({"name": "Alice"}) == "User: Alice"
+
+    def test_non_string_non_callable_rejected(self) -> None:
+        """Test that non-string, non-callable prompt is rejected."""
+        with pytest.raises(ValidationError):
+            ZapAgent(name="Test", prompt=123)  # type: ignore[arg-type]
+
+    def test_none_prompt_rejected(self) -> None:
+        """Test that None prompt is rejected."""
+        with pytest.raises(ValidationError):
+            ZapAgent(name="Test", prompt=None)  # type: ignore[arg-type]

@@ -1,5 +1,7 @@
 """Tests for Zap orchestrator class."""
 
+import warnings
+from dataclasses import dataclass
 from unittest.mock import AsyncMock, MagicMock
 
 import pytest
@@ -398,3 +400,126 @@ class TestZapCancelTask:
         await zap_with_mock_client.start()
         with pytest.raises(NotImplementedError):
             await zap_with_mock_client.cancel_task("some-id")
+
+
+class TestZapContextSupport:
+    """Test context passing in execute_task."""
+
+    @pytest.mark.asyncio
+    async def test_execute_with_dict_context(self, mock_temporal_client: MagicMock) -> None:
+        """Test that dict context is passed to dynamic prompt."""
+        agent = ZapAgent(
+            name="Test",
+            prompt=lambda ctx: f"You assist {ctx['name']} from {ctx['company']}.",
+        )
+        zap = Zap(agents=[agent], temporal_client=mock_temporal_client)
+        await zap.start()
+
+        await zap.execute_task(
+            agent_name="Test",
+            task="Hello",
+            context={"name": "Alice", "company": "Acme"},
+        )
+
+        # Verify workflow was started with resolved prompt
+        call_args = mock_temporal_client.start_workflow.call_args
+        workflow_input = call_args[0][1]
+        assert workflow_input.system_prompt == "You assist Alice from Acme."
+
+    @pytest.mark.asyncio
+    async def test_execute_with_typed_context(self, mock_temporal_client: MagicMock) -> None:
+        """Test that typed context is passed to dynamic prompt."""
+
+        @dataclass
+        class MyContext:
+            user_name: str
+            company: str
+
+        def resolve_prompt(ctx: MyContext) -> str:
+            return f"You assist {ctx.user_name} from {ctx.company}."
+
+        agent: ZapAgent[MyContext] = ZapAgent(
+            name="Test",
+            prompt=resolve_prompt,
+        )
+        zap: Zap[MyContext] = Zap(agents=[agent], temporal_client=mock_temporal_client)
+        await zap.start()
+
+        await zap.execute_task(
+            agent_name="Test",
+            task="Hello",
+            context=MyContext(user_name="Bob", company="TechCo"),
+        )
+
+        call_args = mock_temporal_client.start_workflow.call_args
+        workflow_input = call_args[0][1]
+        assert workflow_input.system_prompt == "You assist Bob from TechCo."
+
+    @pytest.mark.asyncio
+    async def test_execute_static_prompt_ignores_context(
+        self, mock_temporal_client: MagicMock
+    ) -> None:
+        """Test that static prompt works regardless of context."""
+        agent = ZapAgent(name="Test", prompt="Static prompt")
+        zap = Zap(agents=[agent], temporal_client=mock_temporal_client)
+        await zap.start()
+
+        await zap.execute_task(agent_name="Test", task="Hello", context={"ignored": "value"})
+
+        call_args = mock_temporal_client.start_workflow.call_args
+        workflow_input = call_args[0][1]
+        assert workflow_input.system_prompt == "Static prompt"
+
+    @pytest.mark.asyncio
+    async def test_execute_without_context_uses_empty_dict(
+        self, mock_temporal_client: MagicMock
+    ) -> None:
+        """Test that missing context defaults to empty dict."""
+        agent = ZapAgent(name="Test", prompt="Static prompt")
+        zap = Zap(agents=[agent], temporal_client=mock_temporal_client)
+        await zap.start()
+
+        await zap.execute_task(agent_name="Test", task="Hello")
+
+        call_args = mock_temporal_client.start_workflow.call_args
+        workflow_input = call_args[0][1]
+        assert workflow_input.system_prompt == "Static prompt"
+
+    @pytest.mark.asyncio
+    async def test_dynamic_prompt_without_context_warns(
+        self, mock_temporal_client: MagicMock
+    ) -> None:
+        """Test that dynamic prompt without context emits warning."""
+        agent = ZapAgent(
+            name="Test",
+            prompt=lambda ctx: f"User: {ctx.get('name', 'unknown')}",
+        )
+        zap = Zap(agents=[agent], temporal_client=mock_temporal_client)
+        await zap.start()
+
+        with warnings.catch_warnings(record=True) as w:
+            warnings.simplefilter("always")
+            await zap.execute_task(agent_name="Test", task="Hello")
+
+            assert len(w) == 1
+            assert "dynamic prompt but no context was provided" in str(w[0].message)
+            assert issubclass(w[0].category, UserWarning)
+
+    @pytest.mark.asyncio
+    async def test_dynamic_prompt_with_context_no_warning(
+        self, mock_temporal_client: MagicMock
+    ) -> None:
+        """Test that dynamic prompt with context does not warn."""
+        agent = ZapAgent(
+            name="Test",
+            prompt=lambda ctx: f"User: {ctx.get('name', 'unknown')}",
+        )
+        zap = Zap(agents=[agent], temporal_client=mock_temporal_client)
+        await zap.start()
+
+        with warnings.catch_warnings(record=True) as w:
+            warnings.simplefilter("always")
+            await zap.execute_task(agent_name="Test", task="Hello", context={"name": "Alice"})
+
+            # No warnings should be emitted
+            assert len(w) == 0

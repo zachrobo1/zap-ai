@@ -2,12 +2,14 @@
 
 from __future__ import annotations
 
+import warnings
 from dataclasses import dataclass, field
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING, Any, Generic
 from uuid import uuid4
 
 from zap_ai.core.agent import ZapAgent
 from zap_ai.core.task import Task, TaskStatus
+from zap_ai.core.types import TContext
 from zap_ai.tracing import NoOpTracingProvider, TracingProvider
 
 if TYPE_CHECKING:
@@ -41,12 +43,13 @@ class TaskNotFoundError(Exception):
 
 
 @dataclass
-class Zap:
+class Zap(Generic[TContext]):
     """
     Main orchestrator for the Zap AI agent platform.
 
     Zap manages a collection of agents and provides methods to execute
-    tasks against them. It handles:
+    tasks against them. It supports a generic context type that can be
+    passed to agents with dynamic prompts. It handles:
     - Agent configuration validation at build time
     - Temporal client connection management
     - Task execution via Temporal workflows
@@ -56,6 +59,7 @@ class Zap:
         ```python
         from zap_ai import Zap, ZapAgent
 
+        # Simple usage with static prompts
         agents = [
             ZapAgent(name="MainAgent", prompt="You are helpful..."),
             ZapAgent(name="HelperAgent", prompt="You assist with..."),
@@ -68,6 +72,28 @@ class Zap:
             agent_name="MainAgent",
             task="Help me with something",
         )
+
+        # With typed context and dynamic prompts
+        from dataclasses import dataclass
+
+        @dataclass
+        class MyContext:
+            user_name: str
+            company: str
+
+        agent = ZapAgent[MyContext](
+            name="Helper",
+            prompt=lambda ctx: f"You assist {ctx.user_name} from {ctx.company}.",
+        )
+
+        zap: Zap[MyContext] = Zap(agents=[agent])
+        await zap.start()
+
+        task = await zap.execute_task(
+            agent_name="Helper",
+            task="Help me with something",
+            context=MyContext(user_name="Alice", company="Acme"),
+        )
         ```
 
     Attributes:
@@ -79,13 +105,13 @@ class Zap:
     """
 
     # Configuration (set at init)
-    agents: list[ZapAgent]
+    agents: list[ZapAgent[TContext]]
     temporal_client: TemporalClient | None = None
     task_queue: str = "zap-agents"
     tracing_provider: TracingProvider | None = None
 
     # Internal state (populated after init/start)
-    _agent_map: dict[str, ZapAgent] = field(default_factory=dict, init=False, repr=False)
+    _agent_map: dict[str, ZapAgent[TContext]] = field(default_factory=dict, init=False, repr=False)
     _started: bool = field(default=False, init=False, repr=False)
     _tool_registry: ToolRegistry | None = field(default=None, init=False, repr=False)
     _owns_temporal_client: bool = field(default=False, init=False, repr=False)
@@ -195,7 +221,7 @@ class Zap:
             if agent_name not in visited:
                 dfs(agent_name)
 
-    def get_agent(self, name: str) -> ZapAgent:
+    def get_agent(self, name: str) -> ZapAgent[TContext]:
         """
         Get an agent by name.
 
@@ -272,6 +298,7 @@ class Zap:
         agent_name: str | None = None,
         task: str | None = None,
         follow_up_on_task: str | None = None,
+        context: TContext | None = None,
     ) -> Task:
         """
         Execute a new task or follow up on an existing one.
@@ -285,6 +312,9 @@ class Zap:
             task: The task description/prompt to send to the agent. Required.
             follow_up_on_task: If provided, sends the task as a follow-up
                 message to an existing task instead of starting a new one.
+            context: Optional context to pass to agents with dynamic prompts.
+                Defaults to {} if not provided. Note: agents with callable
+                prompts should be given appropriate context.
 
         Returns:
             Task object with initial state. Use get_task() to poll for updates.
@@ -300,6 +330,15 @@ class Zap:
             task = await zap.execute_task(
                 agent_name="MyAgent",
                 task="Analyze this data and summarize findings",
+            )
+            ```
+
+        Example (with context):
+            ```python
+            task = await zap.execute_task(
+                agent_name="Helper",
+                task="Help me with something",
+                context=MyContext(user_name="Alice", company="Acme"),
             )
             ```
 
@@ -326,6 +365,22 @@ class Zap:
         # Validate agent exists and get agent config
         agent = self.get_agent(agent_name)
 
+        # Use default empty dict if no context provided
+        effective_context: TContext = context if context is not None else {}  # type: ignore[assignment]
+
+        # Warn if agent has dynamic prompt but no context provided
+        if agent.is_dynamic_prompt() and context is None:
+            warnings.warn(
+                f"Agent '{agent_name}' has a dynamic prompt but no context was provided. "
+                "The prompt will be called with an empty dict. "
+                "Consider providing context via execute_task(context=...).",
+                UserWarning,
+                stacklevel=2,
+            )
+
+        # Resolve the prompt with context
+        resolved_prompt = agent.resolve_prompt(effective_context)
+
         # Generate task ID
         task_id = f"{agent_name}-{uuid4().hex[:12]}"
 
@@ -343,7 +398,7 @@ class Zap:
             AgentWorkflowInput(
                 agent_name=agent_name,
                 initial_task=task,
-                system_prompt=agent.prompt,
+                system_prompt=resolved_prompt,
                 model=agent.model,
                 tools=tools,
             ),
