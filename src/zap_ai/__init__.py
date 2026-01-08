@@ -34,9 +34,12 @@ from importlib.metadata import version
 
 from zap_ai.core import (
     AgentNotFoundError,
+    DefaultContext,
+    DynamicPrompt,
     Task,
     TaskNotFoundError,
     TaskStatus,
+    TContext,
     Zap,
     ZapAgent,
     ZapConfigurationError,
@@ -56,6 +59,10 @@ __all__ = [
     "ZapNotStartedError",
     "AgentNotFoundError",
     "TaskNotFoundError",
+    # Types
+    "TContext",
+    "DefaultContext",
+    "DynamicPrompt",
     # Metadata
     "__version__",
 ]
