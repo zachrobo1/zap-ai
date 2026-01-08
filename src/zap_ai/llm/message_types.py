@@ -6,6 +6,8 @@ import json
 from dataclasses import dataclass, field
 from typing import Any
 
+from zap_ai.utils import parse_tool_arguments
+
 
 @dataclass
 class ToolCall:
@@ -37,11 +39,7 @@ class ToolCall:
         """
         func = tool_call.get("function", {})
         args_raw = func.get("arguments", "{}")
-
-        try:
-            args = json.loads(args_raw) if isinstance(args_raw, str) else args_raw
-        except json.JSONDecodeError:
-            args = {}
+        args = parse_tool_arguments(args_raw)
 
         return cls(
             id=tool_call.get("id", ""),

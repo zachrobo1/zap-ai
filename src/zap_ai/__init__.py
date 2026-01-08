@@ -32,18 +32,19 @@ Example:
 
 from importlib.metadata import version
 
+from zap_ai.conversation import ConversationTurn, ToolCallInfo
 from zap_ai.core import (
-    AgentNotFoundError,
-    ConversationTurn,
     DefaultContext,
     DynamicPrompt,
     Task,
-    TaskNotFoundError,
     TaskStatus,
     TContext,
-    ToolCallInfo,
     Zap,
     ZapAgent,
+)
+from zap_ai.exceptions import (
+    AgentNotFoundError,
+    TaskNotFoundError,
     ZapConfigurationError,
     ZapNotStartedError,
 )

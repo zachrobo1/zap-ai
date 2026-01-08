@@ -6,13 +6,8 @@ from typing import Any
 
 import litellm
 
+from zap_ai.exceptions import LLMProviderError
 from zap_ai.llm.message_types import InferenceResult, ToolCall
-
-
-class LLMProviderError(Exception):
-    """Raised when LLM provider call fails."""
-
-    pass
 
 
 async def complete(

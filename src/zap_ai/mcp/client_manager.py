@@ -6,22 +6,12 @@ import asyncio
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Any
 
+from zap_ai.exceptions import ClientConnectionError, ToolNotFoundError
+
 if TYPE_CHECKING:
     from fastmcp import Client
 
     from zap_ai.core.agent import ZapAgent
-
-
-class ClientConnectionError(Exception):
-    """Raised when client connection fails."""
-
-    pass
-
-
-class ToolNotFoundError(Exception):
-    """Raised when a tool cannot be found in any client."""
-
-    pass
 
 
 @dataclass

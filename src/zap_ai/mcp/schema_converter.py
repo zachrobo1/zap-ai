@@ -4,11 +4,7 @@ from __future__ import annotations
 
 from typing import Any
 
-
-class SchemaConversionError(Exception):
-    """Raised when schema conversion fails."""
-
-    pass
+from zap_ai.exceptions import SchemaConversionError
 
 
 def mcp_tool_to_litellm(mcp_tool: dict[str, Any]) -> dict[str, Any]:
