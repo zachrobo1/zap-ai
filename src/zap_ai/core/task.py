@@ -3,12 +3,14 @@
 from __future__ import annotations
 
 import asyncio
-import json
 from collections.abc import Awaitable, Callable
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from enum import Enum
-from typing import Any
+from typing import TYPE_CHECKING, Any
+
+if TYPE_CHECKING:
+    from zap_ai.conversation import ConversationTurn, ToolCallInfo
 
 
 class TaskStatus(str, Enum):
@@ -44,46 +46,6 @@ class TaskStatus(str, Enum):
     def is_active(self) -> bool:
         """Return True if the task is actively being processed."""
         return self in (TaskStatus.THINKING, TaskStatus.AWAITING_TOOL)
-
-
-@dataclass
-class ToolCallInfo:
-    """
-    Information about a tool call in the conversation.
-
-    Attributes:
-        id: Unique identifier for this tool call.
-        name: Name of the tool that was called.
-        arguments: Parsed arguments dict passed to the tool.
-        result: The tool's result, if available.
-    """
-
-    id: str
-    name: str
-    arguments: dict[str, Any]
-    result: str | None = None
-
-
-@dataclass
-class ConversationTurn:
-    """
-    A single turn in the conversation.
-
-    A turn consists of a user message (or system prompt for turn 0),
-    followed by all assistant responses and tool interactions until
-    the next user message.
-
-    Attributes:
-        turn_number: Zero-indexed turn number.
-        user_message: The user (or system) message that started this turn.
-        assistant_messages: All assistant responses in this turn.
-        tool_messages: All tool result messages in this turn.
-    """
-
-    turn_number: int
-    user_message: dict[str, Any] | None
-    assistant_messages: list[dict[str, Any]] = field(default_factory=list)
-    tool_messages: list[dict[str, Any]] = field(default_factory=list)
 
 
 @dataclass
@@ -187,17 +149,11 @@ class Task:
             Combined text content as a single string, with messages
             separated by double newlines.
         """
-        text_parts: list[str] = []
-        for msg in self.history:
-            role = msg.get("role", "")
-            if role not in ("user", "assistant"):
-                continue
-            content = msg.get("content")
-            if content and isinstance(content, str):
-                text_parts.append(content)
-        return "\n\n".join(text_parts)
+        from zap_ai.conversation import get_text_content
 
-    def get_tool_calls(self) -> list[ToolCallInfo]:
+        return get_text_content(self.history)
+
+    def get_tool_calls(self) -> list["ToolCallInfo"]:
         """
         Get all tool calls with their results.
 
@@ -205,43 +161,11 @@ class Task:
             List of ToolCallInfo objects containing tool name, arguments,
             and results (if available).
         """
-        tool_results: dict[str, str] = {}
+        from zap_ai.conversation import get_tool_calls
 
-        # First pass: collect tool results
-        for msg in self.history:
-            if msg.get("role") != "tool":
-                continue
-            tool_call_id = msg.get("tool_call_id")
-            content = msg.get("content", "")
-            if tool_call_id:
-                tool_results[tool_call_id] = content
+        return get_tool_calls(self.history)
 
-        # Second pass: collect tool calls and match results
-        tool_calls: list[ToolCallInfo] = []
-        for msg in self.history:
-            if msg.get("role") != "assistant":
-                continue
-            for tc in msg.get("tool_calls", []):
-                func = tc.get("function", {})
-                tc_id = tc.get("id", "")
-                args_raw = func.get("arguments", "{}")
-                try:
-                    args = json.loads(args_raw) if isinstance(args_raw, str) else args_raw
-                except json.JSONDecodeError:
-                    args = {}
-
-                tool_calls.append(
-                    ToolCallInfo(
-                        id=tc_id,
-                        name=func.get("name", ""),
-                        arguments=args,
-                        result=tool_results.get(tc_id),
-                    )
-                )
-
-        return tool_calls
-
-    def get_turns(self) -> list[ConversationTurn]:
+    def get_turns(self) -> list["ConversationTurn"]:
         """
         Get all conversation turns.
 
@@ -252,44 +176,11 @@ class Task:
         Returns:
             List of ConversationTurn objects, one per turn.
         """
-        turns: list[ConversationTurn] = []
-        current_turn = ConversationTurn(
-            turn_number=0,
-            user_message=None,
-        )
+        from zap_ai.conversation import get_turns
 
-        for msg in self.history:
-            role = msg.get("role", "")
+        return get_turns(self.history)
 
-            if role == "system":
-                # System messages go in turn 0
-                if current_turn.turn_number == 0 and current_turn.user_message is None:
-                    current_turn.user_message = msg
-                continue
-
-            if role == "user":
-                # Start a new turn (save previous if it has content)
-                if current_turn.user_message or current_turn.assistant_messages:
-                    turns.append(current_turn)
-                    current_turn = ConversationTurn(
-                        turn_number=len(turns),
-                        user_message=None,
-                    )
-                current_turn.user_message = msg
-
-            elif role == "assistant":
-                current_turn.assistant_messages.append(msg)
-
-            elif role == "tool":
-                current_turn.tool_messages.append(msg)
-
-        # Don't forget the last turn
-        if current_turn.user_message or current_turn.assistant_messages:
-            turns.append(current_turn)
-
-        return turns
-
-    def get_turn(self, turn_num: int) -> ConversationTurn | None:
+    def get_turn(self, turn_num: int) -> "ConversationTurn | None":
         """
         Get messages for a specific conversation turn.
 
@@ -299,14 +190,15 @@ class Task:
         Returns:
             ConversationTurn with the turn's messages, or None if turn doesn't exist.
         """
-        turns = self.get_turns()
-        if turn_num < 0 or turn_num >= len(turns):
-            return None
-        return turns[turn_num]
+        from zap_ai.conversation import get_turn
+
+        return get_turn(self.history, turn_num)
 
     def turn_count(self) -> int:
         """Return the number of conversation turns."""
-        return len(self.get_turns())
+        from zap_ai.conversation import turn_count
+
+        return turn_count(self.history)
 
     async def get_sub_tasks(self) -> list["Task"]:
         """

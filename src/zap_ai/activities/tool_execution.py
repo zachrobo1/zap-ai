@@ -12,6 +12,7 @@ from typing import TYPE_CHECKING, Any
 
 from temporalio import activity
 
+from zap_ai.exceptions import ToolExecutionError, ToolNotFoundError
 from zap_ai.tracing import ObservationType, TraceContext, get_tracing_provider
 
 if TYPE_CHECKING:
@@ -54,18 +55,6 @@ class ToolExecutionInput:
     tool_name: str
     arguments: dict[str, Any] = field(default_factory=dict)
     trace_context: dict[str, Any] | None = None
-
-
-class ToolExecutionError(Exception):
-    """Raised when tool execution fails."""
-
-    pass
-
-
-class ToolNotFoundError(Exception):
-    """Raised when a tool is not found for the agent."""
-
-    pass
 
 
 # Global reference to tool registry (set during worker initialization)

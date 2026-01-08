@@ -10,36 +10,23 @@ from uuid import uuid4
 from zap_ai.core.agent import ZapAgent
 from zap_ai.core.task import Task, TaskStatus
 from zap_ai.core.types import TContext
+from zap_ai.core.validation import (
+    build_agent_map,
+    validate_no_circular_dependencies,
+    validate_no_duplicate_names,
+    validate_sub_agent_references,
+)
+from zap_ai.exceptions import (
+    AgentNotFoundError,
+    TaskNotFoundError,
+    ZapNotStartedError,
+)
 from zap_ai.tracing import NoOpTracingProvider, TracingProvider
 
 if TYPE_CHECKING:
     from temporalio.client import Client as TemporalClient
 
     from zap_ai.mcp import ToolRegistry
-
-
-class ZapConfigurationError(Exception):
-    """Raised when Zap configuration is invalid."""
-
-    pass
-
-
-class ZapNotStartedError(Exception):
-    """Raised when operations are attempted before calling start()."""
-
-    pass
-
-
-class AgentNotFoundError(Exception):
-    """Raised when referencing an agent that doesn't exist."""
-
-    pass
-
-
-class TaskNotFoundError(Exception):
-    """Raised when referencing a task that doesn't exist."""
-
-    pass
 
 
 @dataclass
@@ -131,95 +118,13 @@ class Zap(Generic[TContext]):
         Raises:
             ZapConfigurationError: If any validation fails.
         """
-        self._validate_no_duplicate_names()
-        self._build_agent_map()
-        self._validate_sub_agent_references()
-        self._validate_no_circular_dependencies()
+        validate_no_duplicate_names(self.agents)
+        self._agent_map = build_agent_map(self.agents)
+        validate_sub_agent_references(self.agents, self._agent_map)
+        validate_no_circular_dependencies(self.agents, self._agent_map)
 
         # Initialize tracing (use NoOp if not configured)
         self._tracing = self.tracing_provider or NoOpTracingProvider()
-
-    def _validate_no_duplicate_names(self) -> None:
-        """
-        Check that all agent names are unique.
-
-        Raises:
-            ZapConfigurationError: If duplicate names found.
-        """
-        names = [agent.name for agent in self.agents]
-        if len(names) != len(set(names)):
-            duplicates = [name for name in names if names.count(name) > 1]
-            raise ZapConfigurationError(
-                f"Duplicate agent names detected: {set(duplicates)}. "
-                "Each agent must have a unique name."
-            )
-
-    def _build_agent_map(self) -> None:
-        """Build internal name -> agent lookup map."""
-        self._agent_map = {agent.name: agent for agent in self.agents}
-
-    def _validate_sub_agent_references(self) -> None:
-        """
-        Validate that all sub_agent references point to existing agents.
-
-        Raises:
-            ZapConfigurationError: If any sub-agent reference is invalid.
-        """
-        all_names = set(self._agent_map.keys())
-        for agent in self.agents:
-            for sub_name in agent.sub_agents:
-                if sub_name not in all_names:
-                    raise ZapConfigurationError(
-                        f"Agent '{agent.name}' references unknown sub-agent '{sub_name}'. "
-                        f"Available agents: {sorted(all_names)}"
-                    )
-                if sub_name == agent.name:
-                    raise ZapConfigurationError(
-                        f"Agent '{agent.name}' cannot reference itself as a sub-agent."
-                    )
-
-    def _validate_no_circular_dependencies(self) -> None:
-        """
-        Detect circular dependencies in sub-agent relationships.
-
-        Uses DFS to find cycles in the agent dependency graph.
-
-        Raises:
-            ZapConfigurationError: If a circular dependency is detected.
-        """
-        # Build adjacency list
-        graph: dict[str, list[str]] = {agent.name: agent.sub_agents for agent in self.agents}
-
-        # Track visited and recursion stack for cycle detection
-        visited: set[str] = set()
-        rec_stack: set[str] = set()
-        path: list[str] = []
-
-        def dfs(node: str) -> bool:
-            """Return True if cycle detected."""
-            visited.add(node)
-            rec_stack.add(node)
-            path.append(node)
-
-            for neighbor in graph.get(node, []):
-                if neighbor not in visited:
-                    if dfs(neighbor):
-                        return True
-                elif neighbor in rec_stack:
-                    # Found cycle - build cycle path for error message
-                    cycle_start = path.index(neighbor)
-                    cycle = path[cycle_start:] + [neighbor]
-                    raise ZapConfigurationError(
-                        f"Circular dependency detected: {' -> '.join(cycle)}"
-                    )
-
-            path.pop()
-            rec_stack.remove(node)
-            return False
-
-        for agent_name in graph:
-            if agent_name not in visited:
-                dfs(agent_name)
 
     def get_agent(self, name: str) -> ZapAgent[TContext]:
         """
