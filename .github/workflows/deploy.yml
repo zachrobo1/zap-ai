@@ -1,16 +1,16 @@
 name: Deploy to PyPI
 
 on:
-  workflow_dispatch:
+  release:
+    types: [published]
 
 jobs:
   deploy:
     name: Build & Publish
     runs-on: ubuntu-latest
-    if: github.ref == 'refs/heads/main'
     environment: pypi
     permissions:
-      id-token: write  # Required for trusted publishing
+      id-token: write
     steps:
       - uses: actions/checkout@v4
 
