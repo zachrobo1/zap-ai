@@ -326,7 +326,7 @@ for sub in sub_tasks:
 
 ## Observability
 
-Zap supports tracing via a pluggable provider system. Currently supported: **Langfuse**.
+Zap supports tracing via a pluggable provider system. Langfuse is included out of the box, and you can implement custom providers by extending `BaseTracingProvider`.
 
 ### Langfuse Integration
 
@@ -377,7 +377,6 @@ Zap supports tracing via a pluggable provider system. Currently supported: **Lan
 - Human-in-the-loop tools (approval workflows)
 - Hooks system for custom logic injection
 - Expose agents as MCP servers for agent-to-agent communication
-- Additional tracing providers (OpenTelemetry, etc.)
 
 ## Examples
 

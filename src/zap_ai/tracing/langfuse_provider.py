@@ -1,16 +1,14 @@
 """Langfuse tracing provider implementation.
 
-This module provides a Langfuse implementation of the TracingProvider protocol,
+This module provides a Langfuse implementation of the BaseTracingProvider,
 using Langfuse's v3 SDK with native observation types.
 """
 
 from __future__ import annotations
 
-from collections.abc import AsyncIterator
-from contextlib import asynccontextmanager
 from typing import Any
-from uuid import uuid4
 
+from zap_ai.tracing.base import BaseTracingProvider
 from zap_ai.tracing.protocol import ObservationType, TraceContext
 
 try:
@@ -23,9 +21,9 @@ except ImportError:
     )
 
 
-class LangfuseTracingProvider:
+class LangfuseTracingProvider(BaseTracingProvider):
     """
-    Langfuse implementation of TracingProvider.
+    Langfuse implementation of BaseTracingProvider.
 
     Uses Langfuse's v3 SDK for async-compatible tracing with
     native observation types (generation, tool, agent, span).
@@ -58,7 +56,7 @@ class LangfuseTracingProvider:
         # Track active observations for ending them later
         self._active_observations: dict[str, Any] = {}
 
-    def _make_trace_context(
+    def _make_langfuse_trace_context(
         self, trace_id: str, parent_span_id: str | None = None
     ) -> LangfuseTraceContext:
         """Create a Langfuse TraceContext dict."""
@@ -77,24 +75,23 @@ class LangfuseTracingProvider:
         }
         return mapping.get(obs_type, "span")
 
-    @asynccontextmanager
-    async def start_trace(
+    async def _start_trace_impl(
         self,
         name: str,
         session_id: str | None = None,
         user_id: str | None = None,
         metadata: dict[str, Any] | None = None,
         tags: list[str] | None = None,
-    ) -> AsyncIterator[TraceContext]:
+    ) -> tuple[TraceContext, Any]:
         """Start a new Langfuse trace.
 
         In v3, the trace is implicitly created by the first span. We create a
         root span to represent the trace and update it with trace-level metadata.
         """
         trace_id = self._langfuse.create_trace_id()
-        span_id = uuid4().hex[:16]  # W3C format: 16 hex chars
+        span_id = self._generate_span_id(w3c_format=True)
 
-        trace_context = self._make_trace_context(trace_id)
+        trace_context = self._make_langfuse_trace_context(trace_id)
 
         # Create a root span that represents the trace
         root_span = self._langfuse.start_span(
@@ -121,23 +118,25 @@ class LangfuseTracingProvider:
             },
         )
 
-        try:
-            yield context
-        finally:
-            root_span.end()
-            self._active_observations.pop(trace_id, None)
+        return context, root_span
 
-    @asynccontextmanager
-    async def start_observation(
+    async def _end_trace_cleanup(self, context: TraceContext, cleanup_data: Any) -> None:
+        """End the root span when trace exits."""
+        root_span = cleanup_data
+        if root_span:
+            root_span.end()
+            self._active_observations.pop(context.trace_id, None)
+
+    async def _start_observation_impl(
         self,
         name: str,
         observation_type: ObservationType,
         parent_context: TraceContext,
         metadata: dict[str, Any] | None = None,
         input_data: Any | None = None,
-    ) -> AsyncIterator[TraceContext]:
+    ) -> tuple[TraceContext, Any]:
         """Start a child observation in Langfuse with the appropriate type."""
-        span_id = uuid4().hex[:16]
+        span_id = self._generate_span_id(w3c_format=True)
 
         # Get parent span ID
         parent_span_id = None
@@ -146,7 +145,7 @@ class LangfuseTracingProvider:
                 "langfuse_observation_id"
             ) or parent_context.provider_data.get("langfuse_root_span_id")
 
-        trace_context = self._make_trace_context(parent_context.trace_id, parent_span_id)
+        trace_context = self._make_langfuse_trace_context(parent_context.trace_id, parent_span_id)
 
         # Get the Langfuse type string and add to metadata
         langfuse_type = self._observation_type_to_langfuse(observation_type)
@@ -155,22 +154,13 @@ class LangfuseTracingProvider:
             **(metadata or {}),
         }
 
-        # Create span with appropriate type via start_as_current_observation
-        # For v3, we use the as_type parameter to set the observation type
-        if langfuse_type in ("tool", "agent"):
-            span = self._langfuse.start_span(
-                name=name,
-                trace_context=trace_context,
-                input=input_data,
-                metadata=obs_metadata,
-            )
-        else:
-            span = self._langfuse.start_span(
-                name=name,
-                trace_context=trace_context,
-                input=input_data,
-                metadata=obs_metadata,
-            )
+        # Create span with appropriate type
+        span = self._langfuse.start_span(
+            name=name,
+            trace_context=trace_context,
+            input=input_data,
+            metadata=obs_metadata,
+        )
 
         self._active_observations[span_id] = span
 
@@ -183,11 +173,14 @@ class LangfuseTracingProvider:
             },
         )
 
-        try:
-            yield context
-        finally:
+        return context, span
+
+    async def _end_observation_cleanup(self, context: TraceContext, cleanup_data: Any) -> None:
+        """End the span when observation exits."""
+        span = cleanup_data
+        if span:
             span.end()
-            self._active_observations.pop(span_id, None)
+            self._active_observations.pop(context.span_id, None)
 
     async def start_generation(
         self,
@@ -198,7 +191,7 @@ class LangfuseTracingProvider:
         metadata: dict[str, Any] | None = None,
     ) -> TraceContext:
         """Start a Langfuse generation for LLM calls."""
-        span_id = uuid4().hex[:16]
+        span_id = self._generate_span_id(w3c_format=True)
 
         # Get parent span ID
         parent_span_id = None
@@ -207,7 +200,7 @@ class LangfuseTracingProvider:
                 "langfuse_observation_id"
             ) or parent_context.provider_data.get("langfuse_root_span_id")
 
-        trace_context = self._make_trace_context(parent_context.trace_id, parent_span_id)
+        trace_context = self._make_langfuse_trace_context(parent_context.trace_id, parent_span_id)
 
         # Use start_observation with as_type='generation' (v3 preferred API)
         generation = self._langfuse.start_observation(

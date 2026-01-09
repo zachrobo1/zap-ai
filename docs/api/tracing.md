@@ -22,6 +22,12 @@ The tracing module provides observability for agent execution.
     options:
       show_source: true
 
+## Abstract Base Class
+
+::: zap_ai.tracing.base.BaseTracingProvider
+    options:
+      show_source: true
+
 ::: zap_ai.tracing.protocol.TraceContext
     options:
       show_source: true

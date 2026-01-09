@@ -4,6 +4,7 @@ This example demonstrates:
 - Creating multiple agents with different specializations
 - Setting up sub-agent relationships for delegation
 - Using the message_agent tool to delegate tasks
+- Langfuse tracing for observability across sub-agent delegation
 
 The setup:
 - Coordinator: Main agent that routes tasks to specialists
@@ -12,8 +13,9 @@ The setup:
 
 Prerequisites:
 1. Copy .env.example to .env and set ANTHROPIC_API_KEY
-2. Start Temporal server: temporal server start-dev
-3. Run this script: python main.py
+2. Optionally set LANGFUSE_PUBLIC_KEY and LANGFUSE_SECRET_KEY for tracing
+3. Start Temporal server: temporal server start-dev
+4. Run this script: python main.py
 """
 
 import asyncio
@@ -25,10 +27,31 @@ from fastmcp import Client
 from temporalio.client import Client as TemporalClient
 
 from zap_ai import Zap, ZapAgent
+from zap_ai.tracing import LangfuseTracingProvider
 from zap_ai.worker import create_worker
 
 # Load .env from project root
 load_dotenv(Path(__file__).parent.parent.parent / ".env")
+
+
+def create_tracing_provider() -> LangfuseTracingProvider | None:
+    """Create Langfuse tracing provider if configured."""
+    public_key = os.environ.get("LANGFUSE_PUBLIC_KEY")
+    secret_key = os.environ.get("LANGFUSE_SECRET_KEY")
+
+    if not public_key or not secret_key:
+        print("Langfuse not configured - running without tracing")
+        return None
+
+    host = os.environ.get("LANGFUSE_HOST")
+    print("Langfuse tracing enabled!")
+    print(f"  Host: {host or 'https://cloud.langfuse.com'}")
+
+    return LangfuseTracingProvider(
+        public_key=public_key,
+        secret_key=secret_key,
+        host=host,
+    )
 
 
 async def main() -> None:
@@ -37,6 +60,9 @@ async def main() -> None:
         print("Error: ANTHROPIC_API_KEY not set.")
         print("Set it in .env or export ANTHROPIC_API_KEY=your-key")
         return
+
+    # Create tracing provider (None if not configured)
+    tracing = create_tracing_provider()
 
     # Path to the tools server
     tools_path = Path(__file__).parent / "tools.py"
@@ -87,8 +113,11 @@ Always summarize the final results for the user.""",
         max_iterations=15,
     )
 
-    # Create Zap with all agents
-    zap = Zap(agents=[coordinator, researcher, calculator])
+    # Create Zap with all agents and tracing
+    zap = Zap(
+        agents=[coordinator, researcher, calculator],
+        tracing_provider=tracing,
+    )
 
     # Connect to Temporal and create worker
     temporal_client = await TemporalClient.connect("localhost:7233")
@@ -106,6 +135,7 @@ Always summarize the final results for the user.""",
             temporal_client,
             task_queue=zap.task_queue,
             tool_registry=zap._tool_registry,
+            tracing_provider=tracing,
         )
 
         # Start worker in background
@@ -148,6 +178,12 @@ Please coordinate with the appropriate specialists.""",
             if task.error:
                 print(f"Error: {task.error}")
 
+        # Flush traces before exit
+        if tracing:
+            print("\nFlushing traces to Langfuse...")
+            await tracing.flush()
+            print("Done! Check your Langfuse dashboard to see the trace.")
+
     finally:
         print("\nShutting down...")
         # Cancel worker task
@@ -157,6 +193,10 @@ Please coordinate with the appropriate specialists.""",
                 await worker_task
             except asyncio.CancelledError:
                 pass
+
+        if tracing:
+            await tracing.shutdown()
+
         await zap.stop()
         print("Done!")
 
