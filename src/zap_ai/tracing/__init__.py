@@ -23,6 +23,7 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING
 
+from zap_ai.tracing.base import BaseTracingProvider
 from zap_ai.tracing.noop_provider import NoOpTracingProvider
 from zap_ai.tracing.protocol import (
     ObservationType,
@@ -77,8 +78,9 @@ def reset_tracing_provider() -> None:
 
 
 __all__ = [
-    # Protocol and types
+    # Protocol and ABC
     "TracingProvider",
+    "BaseTracingProvider",
     "TraceContext",
     "ObservationType",
     # Providers
