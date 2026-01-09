@@ -210,26 +210,26 @@ python worker.py
 
 ```
 ┌─────────────────────────────────────────────────────────────────┐
-│                         Zap Orchestrator                         │
-│  • Validates agent configuration at build time                   │
-│  • Manages Temporal client connection                            │
-│  • Resolves dynamic prompts with context                         │
-│  • Routes tasks to appropriate agent workflows                   │
+│                         Zap Orchestrator                        │
+│  • Validates agent configuration at build time                  │
+│  • Manages Temporal client connection                           │
+│  • Resolves dynamic prompts with context                        │
+│  • Routes tasks to appropriate agent workflows                  │
 └─────────────────────────────────────────────────────────────────┘
                                   │
                                   ▼
 ┌─────────────────────────────────────────────────────────────────┐
-│                    Temporal Workflow (per task)                  │
-│  ┌─────────────┐    ┌─────────────┐    ┌─────────────────────┐ │
-│  │   Receive   │───▶│   LLM       │───▶│   Tool Execution    │ │
-│  │   Message   │    │  Inference  │    │   (parallel)        │ │
-│  └─────────────┘    └─────────────┘    └─────────────────────┘ │
+│                    Temporal Workflow (per task)                 │
+│  ┌─────────────┐    ┌─────────────┐    ┌─────────────────────┐  │
+│  │   Receive   │───▶│   LLM       │───▶│   Tool Execution    │  │
+│  │   Message   │    │  Inference  │    │   (parallel)        │  │
+│  └─────────────┘    └─────────────┘    └─────────────────────┘  │
 │         ▲                                        │              │
 │         │                                        │              │
 │         └────────────────────────────────────────┘              │
 │                     (agentic loop)                              │
-│                                                                  │
-│  Features:                                                       │
+│                                                                 │
+│  Features:                                                      │
 │  • Signals: Receive follow-up messages                          │
 │  • Queries: Check status, get history                           │
 │  • Continue-as-new: Handle long conversations                   │
@@ -238,14 +238,14 @@ python worker.py
                                   │
                                   ▼
 ┌─────────────────────────────────────────────────────────────────┐
-│                         Activities                               │
-│  ┌────────────────────┐    ┌─────────────────────────────────┐ │
-│  │  Inference         │    │  Tool Execution                  │ │
-│  │  (LiteLLM)         │    │  (FastMCP clients)               │ │
-│  │  • Retry on failure│    │  • Parallel execution            │ │
-│  │  • Provider agnostic│   │  • Schema conversion             │ │
-│  │  • Tracing support │    │  • Tracing support               │ │
-│  └────────────────────┘    └─────────────────────────────────┘ │
+│                         Activities                              │
+│  ┌────────────────────┐    ┌─────────────────────────────────┐  │
+│  │  Inference         │    │  Tool Execution                 │  │
+│  │  (LiteLLM)         │    │  (FastMCP clients)              │  │
+│  │  • Retry on failure│    │  • Parallel execution           │  │
+│  │  • Provider agnostic│   │  • Schema conversion            │  │
+│  │  • Tracing support │    │  • Tracing support              │  │
+│  └────────────────────┘    └─────────────────────────────────┘  │
 └─────────────────────────────────────────────────────────────────┘
 ```
 

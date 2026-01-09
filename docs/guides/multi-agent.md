@@ -100,7 +100,7 @@ Sub-agent delegation uses Temporal child workflows:
 
 ```
 ┌─────────────────────────────────────────┐
-│         Parent Workflow                  │
+│         Parent Workflow                 │
 │  ┌─────────────────────────────────┐    │
 │  │  message_agent("DatabaseAgent") │────┼──► Child Workflow (DatabaseAgent)
 │  └─────────────────────────────────┘    │         │
