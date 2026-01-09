@@ -1,4 +1,4 @@
-# Zap - Zach's Agent Platform
+# Zap - Zach's Agent Platform ⚡️
 
 [![PyPI version](https://img.shields.io/pypi/v/zap-ai)](https://pypi.org/project/zap-ai/)
 [![Coverage](https://codecov.io/gh/zachrobo1/zap-ai/graph/badge.svg)](https://codecov.io/gh/zachrobo1/zap-ai)
@@ -16,6 +16,8 @@ LLM providers can't yet guarantee production-level SLAs. API calls fail, rate li
 - **Sub-agent delegation** - compose complex systems from specialized agents
 - **MCP integration** - easily add tools via the Model Context Protocol
 - **Provider agnostic** - use any LLM supported by LiteLLM (OpenAI, Anthropic, etc.)
+- **Observability** - built-in tracing support with Langfuse integration
+- **Dynamic prompts** - context-aware prompts resolved at runtime
 
 ## Built On
 
@@ -56,7 +58,7 @@ uv add zap-ai
 
 ```python
 import asyncio
-from zap_ai import ZapAgent, Zap, TaskStatus
+from zap_ai import Zap, ZapAgent, Task, TaskStatus
 from fastmcp import Client
 
 # Create MCP clients for tool access
@@ -67,7 +69,7 @@ database_client = Client("./my_db_server.py")
 main_agent = ZapAgent(
     name="MainAgent",
     prompt="You are a helpful research assistant. Use your tools to find information and delegate complex lookups to the LookupAgent.",
-    model="gpt-4o",  # Any LiteLLM-supported model
+    model="anthropic/claude-sonnet-4-5-20250929",  # Any LiteLLM-supported model
     mcp_clients=[search_client],
     sub_agents=["LookupAgent"],  # Can delegate to this agent
 )
@@ -127,7 +129,37 @@ await zap.execute_task(
 )
 ```
 
-### 4. Run the Worker (Separate Process)
+### 4. Dynamic Prompts with Context
+
+Agents can use dynamic prompts that receive context at execution time:
+
+```python
+from dataclasses import dataclass
+
+@dataclass
+class UserContext:
+    user_name: str
+    company: str
+
+# Agent with dynamic prompt
+assistant = ZapAgent[UserContext](
+    name="PersonalAssistant",
+    prompt=lambda ctx: f"You are {ctx.user_name}'s assistant at {ctx.company}. Be helpful and professional.",
+    model="gpt-4o",
+)
+
+zap = Zap(agents=[assistant])
+await zap.start()
+
+# Pass context when executing
+task = await zap.execute_task(
+    agent_name="PersonalAssistant",
+    task="Draft an email to my team about the project update.",
+    context=UserContext(user_name="Alice", company="Acme Corp"),
+)
+```
+
+### 5. Run the Worker (Separate Process)
 
 ```python
 # worker.py
@@ -148,7 +180,7 @@ python worker.py
 | Parameter | Type | Default | Description |
 |-----------|------|---------|-------------|
 | `name` | `str` | required | Unique identifier (no spaces) |
-| `prompt` | `str` | required | System prompt for the agent |
+| `prompt` | `str \| Callable` | required | System prompt - static string or `callable(context) -> str` |
 | `model` | `str` | `"gpt-4o"` | LiteLLM model identifier |
 | `mcp_clients` | `list[Client]` | `[]` | FastMCP clients for tool access |
 | `sub_agents` | `list[str]` | `[]` | Names of agents this agent can delegate to |
@@ -163,31 +195,41 @@ python worker.py
 | `temporal_client` | `Client` | `None` | Custom Temporal client (auto-connects if None) |
 | `task_queue` | `str` | `"zap-agents"` | Temporal task queue name |
 
+### execute_task Options
+
+| Parameter | Type | Default | Description |
+|-----------|------|---------|-------------|
+| `agent_name` | `str` | required* | Agent to execute the task (*not needed for follow-ups) |
+| `task` | `str` | required | The task description/prompt |
+| `follow_up_on_task` | `str` | `None` | Continue an existing conversation |
+| `context` | `TContext` | `{}` | Context for dynamic prompts |
+
 ## Architecture
 
 ### How It Works
 
 ```
 ┌─────────────────────────────────────────────────────────────────┐
-│                         Zap Orchestrator                         │
-│  • Validates agent configuration at build time                   │
-│  • Manages Temporal client connection                            │
-│  • Routes tasks to appropriate agent workflows                   │
+│                         Zap Orchestrator                        │
+│  • Validates agent configuration at build time                  │
+│  • Manages Temporal client connection                           │
+│  • Resolves dynamic prompts with context                        │
+│  • Routes tasks to appropriate agent workflows                  │
 └─────────────────────────────────────────────────────────────────┘
                                   │
                                   ▼
 ┌─────────────────────────────────────────────────────────────────┐
-│                    Temporal Workflow (per task)                  │
-│  ┌─────────────┐    ┌─────────────┐    ┌─────────────────────┐ │
-│  │   Receive   │───▶│   LLM       │───▶│   Tool Execution    │ │
-│  │   Message   │    │  Inference  │    │   (parallel)        │ │
-│  └─────────────┘    └─────────────┘    └─────────────────────┘ │
+│                    Temporal Workflow (per task)                 │
+│  ┌─────────────┐    ┌─────────────┐    ┌─────────────────────┐  │
+│  │   Receive   │───▶│   LLM       │───▶│   Tool Execution    │  │
+│  │   Message   │    │  Inference  │    │   (parallel)        │  │
+│  └─────────────┘    └─────────────┘    └─────────────────────┘  │
 │         ▲                                        │              │
 │         │                                        │              │
 │         └────────────────────────────────────────┘              │
 │                     (agentic loop)                              │
-│                                                                  │
-│  Features:                                                       │
+│                                                                 │
+│  Features:                                                      │
 │  • Signals: Receive follow-up messages                          │
 │  • Queries: Check status, get history                           │
 │  • Continue-as-new: Handle long conversations                   │
@@ -196,13 +238,14 @@ python worker.py
                                   │
                                   ▼
 ┌─────────────────────────────────────────────────────────────────┐
-│                         Activities                               │
-│  ┌────────────────────┐    ┌─────────────────────────────────┐ │
-│  │  Inference         │    │  Tool Execution                  │ │
-│  │  (LiteLLM)         │    │  (FastMCP clients)               │ │
-│  │  • Retry on failure│    │  • Parallel execution            │ │
-│  │  • Provider agnostic│   │  • Schema conversion             │ │
-│  └────────────────────┘    └─────────────────────────────────┘ │
+│                         Activities                              │
+│  ┌────────────────────┐    ┌─────────────────────────────────┐  │
+│  │  Inference         │    │  Tool Execution                 │  │
+│  │  (LiteLLM)         │    │  (FastMCP clients)              │  │
+│  │  • Retry on failure│    │  • Parallel execution           │  │
+│  │  • Provider agnostic│   │  • Schema conversion            │  │
+│  │  • Tracing support │    │  • Tracing support              │  │
+│  └────────────────────┘    └─────────────────────────────────┘  │
 └─────────────────────────────────────────────────────────────────┘
 ```
 
@@ -234,12 +277,93 @@ When an agent has sub-agents configured, a special `transfer_to_agent` tool is a
 
 | Status | Description |
 |--------|-------------|
-| `PENDING` | Task created, not yet started |
-| `RUNNING` | Agent is processing (inference or between tool calls) |
-| `AWAITING_TOOL` | Waiting for tool execution to complete |
-| `DELEGATED` | Running in a sub-agent (child workflow) |
+| `PENDING` | Task created, workflow hasn't started yet |
+| `THINKING` | Agent is processing (LLM inference in progress) |
+| `AWAITING_TOOL` | Waiting for tool execution (includes sub-agent delegation) |
 | `COMPLETED` | Task finished successfully |
 | `FAILED` | Task failed with an error |
+
+## Conversation History API
+
+The `Task` object provides methods to inspect the conversation history:
+
+```python
+task = await zap.get_task(task_id)
+
+# Get all text content (user + assistant messages, excluding tool calls)
+text = task.get_text_content()
+
+# Get all tool calls with their results
+tool_calls = task.get_tool_calls()
+for tc in tool_calls:
+    print(f"{tc.name}({tc.arguments}) -> {tc.result}")
+
+# Navigate by conversation turns
+for turn in task.get_turns():
+    print(f"Turn {turn.turn_number}:")
+    print(f"  User: {turn.user_message}")
+    print(f"  Assistant messages: {len(turn.assistant_messages)}")
+    print(f"  Tool calls: {len(turn.tool_messages)}")
+
+# Get a specific turn
+first_turn = task.get_turn(0)
+
+# Count turns
+print(f"Total turns: {task.turn_count()}")
+
+# For multi-agent scenarios: fetch sub-task details
+sub_tasks = await task.get_sub_tasks()
+for sub in sub_tasks:
+    print(f"Sub-task {sub.id}: {sub.status}")
+```
+
+### Conversation Types
+
+| Type | Description |
+|------|-------------|
+| `ToolCallInfo` | Tool call with `id`, `name`, `arguments`, and `result` |
+| `ConversationTurn` | A turn with `turn_number`, `user_message`, `assistant_messages`, `tool_messages` |
+
+## Observability
+
+Zap supports tracing via a pluggable provider system. Currently supported: **Langfuse**.
+
+### Langfuse Integration
+
+1. **Install with Langfuse support:**
+   ```bash
+   pip install zap-ai[langfuse]
+   ```
+
+2. **Configure environment variables:**
+   ```bash
+   export LANGFUSE_PUBLIC_KEY="pk-..."
+   export LANGFUSE_SECRET_KEY="sk-..."
+   # Optional: export LANGFUSE_HOST="https://cloud.langfuse.com"
+   ```
+
+3. **Enable tracing in your application:**
+   ```python
+   from zap_ai.tracing import set_tracing_provider
+   from zap_ai.tracing.langfuse_provider import LangfuseTracingProvider
+
+   # Initialize the provider
+   provider = LangfuseTracingProvider()
+   set_tracing_provider(provider)
+
+   # Your Zap code here...
+
+   # Flush traces on shutdown
+   await provider.flush()
+   ```
+
+### What Gets Traced
+
+- **Task execution** - Each task becomes a trace
+- **Agentic loop iterations** - Spans for each iteration
+- **LLM calls** - Generation observations with token usage
+- **Tool calls** - Tool observations with inputs/outputs
+- **Sub-agent delegations** - Nested agent spans
 
 ## Limitations
 
@@ -253,11 +377,22 @@ When an agent has sub-agents configured, a special `transfer_to_agent` tool is a
 - Human-in-the-loop tools (approval workflows)
 - Hooks system for custom logic injection
 - Expose agents as MCP servers for agent-to-agent communication
-- Execution statistics and debugging tools
+- Additional tracing providers (OpenTelemetry, etc.)
+
+## Examples
+
+The [`examples/`](examples/) folder contains working examples:
+
+- **`simple_agent/`** - Basic single-agent setup with MCP tools
+- **`multi_agent/`** - Multi-agent delegation with `message_agent`
+- **`langfuse_tracing/`** - Observability with Langfuse integration
+- **`conversation_history/`** - Conversation history inspection API
+
+See the [examples README](examples/README.md) for detailed setup instructions.
 
 ## Contributing
 
-Contributions are welcome! Please see [IMPLEMENTATION.md](IMPLEMENTATION.md) for the development roadmap and open tasks.
+Contributions are welcome! Please open an issue or submit a pull request on [GitHub](https://github.com/zachrobo1/zap-ai).
 
 ## License
 
