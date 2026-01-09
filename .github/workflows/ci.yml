@@ -1,6 +1,8 @@
 name: CI
 
 on:
+  push:
+    branches: [main]
   pull_request:
     branches: [main]
 
@@ -46,11 +48,12 @@ jobs:
         run: uv sync --dev
 
       - name: Run unit tests
-        run: uv run pytest tests/unit/ -v
-
-      - name: Run unit tests with coverage
-        if: matrix.python-version == '3.11'
-        run: uv run pytest tests/unit/ --cov=src/zap_ai --cov-report=xml
+        run: |
+          if [ "${{ matrix.python-version }}" = "3.11" ]; then
+            uv run pytest tests/unit/ -v --cov=src/zap_ai --cov-report=xml
+          else
+            uv run pytest tests/unit/ -v
+          fi
 
       - name: Upload coverage to Codecov
         if: matrix.python-version == '3.11'
