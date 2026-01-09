@@ -1,0 +1,50 @@
+site_name: Zap - Zach's Agent Platform
+site_description: Build resilient AI agents on Temporal
+site_url: https://zachrobo1.github.io/zap-ai/
+repo_url: https://github.com/zachrobo1/zap-ai
+repo_name: zachrobo1/zap-ai
+
+theme:
+  name: material
+  palette:
+    - scheme: default
+      primary: deep purple
+      accent: amber
+  features:
+    - navigation.tabs
+    - navigation.sections
+    - content.code.copy
+
+plugins:
+  - search
+  - mkdocstrings:
+      handlers:
+        python:
+          paths: [src]
+          options:
+            show_source: true
+            show_root_heading: true
+            members_order: source
+
+nav:
+  - Home: index.md
+  - Getting Started:
+      - Installation: getting-started/installation.md
+      - Quick Start: getting-started/quickstart.md
+  - Guides:
+      - Dynamic Prompts: guides/dynamic-prompts.md
+      - Multi-Agent Systems: guides/multi-agent.md
+      - Observability: guides/observability.md
+  - API Reference:
+      - Overview: api/index.md
+      - Core: api/core.md
+      - Conversation: api/conversation.md
+      - Tracing: api/tracing.md
+      - Worker: api/worker.md
+      - Exceptions: api/exceptions.md
+markdown_extensions:
+  - pymdownx.highlight
+  - pymdownx.superfences
+  - admonition
+  - toc:
+      permalink: true

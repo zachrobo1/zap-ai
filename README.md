@@ -1,4 +1,4 @@
-# Zap - Zach's Agent Platform
+# Zap - Zach's Agent Platform ⚡️
 
 [![PyPI version](https://img.shields.io/pypi/v/zap-ai)](https://pypi.org/project/zap-ai/)
 [![Coverage](https://codecov.io/gh/zachrobo1/zap-ai/graph/badge.svg)](https://codecov.io/gh/zachrobo1/zap-ai)
@@ -392,7 +392,7 @@ See the [examples README](examples/README.md) for detailed setup instructions.
 
 ## Contributing
 
-Contributions are welcome! Please see [IMPLEMENTATION.md](IMPLEMENTATION.md) for the development roadmap and open tasks.
+Contributions are welcome! Please open an issue or submit a pull request on [GitHub](https://github.com/zachrobo1/zap-ai).
 
 ## License
 
