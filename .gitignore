@@ -92,6 +92,3 @@ cython_debug/
 
 # PyPI configuration file
 .pypirc
-
-# AI
-.serena
