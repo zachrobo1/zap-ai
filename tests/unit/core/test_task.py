@@ -621,3 +621,110 @@ class TestTaskSubTasks:
         assert result[0].id == "Child-1"
         assert result[1].id == "Child-2"
         assert fetched_ids == ["Child-1", "Child-2"]
+
+
+class TestTaskApprovalMethods:
+    """Tests for Task approval-related methods."""
+
+    @pytest.mark.asyncio
+    async def test_get_pending_approvals_no_fetcher_raises(self) -> None:
+        """Test get_pending_approvals raises error without fetcher."""
+        task = Task(id="Agent-123", agent_name="Agent")
+        with pytest.raises(RuntimeError, match="not created via Zap.get_task"):
+            await task.get_pending_approvals()
+
+    @pytest.mark.asyncio
+    async def test_get_pending_approvals_with_fetcher(self) -> None:
+        """Test get_pending_approvals returns formatted data."""
+        from datetime import timedelta, timezone
+
+        from zap_ai.workflows.models import ApprovalRequest
+
+        now = datetime.now(timezone.utc)
+        request = ApprovalRequest(
+            id="approval-123",
+            tool_name="transfer_funds",
+            tool_args={"amount": 1000},
+            requested_at=now,
+            timeout_at=now + timedelta(days=7),
+            context={"agent_name": "TestAgent"},
+        )
+
+        async def mock_fetcher() -> list[ApprovalRequest]:
+            return [request]
+
+        task = Task(id="Agent-123", agent_name="Agent", _approval_fetcher=mock_fetcher)
+        result = await task.get_pending_approvals()
+
+        assert len(result) == 1
+        assert result[0]["id"] == "approval-123"
+        assert result[0]["tool_name"] == "transfer_funds"
+        assert result[0]["tool_args"] == {"amount": 1000}
+        assert result[0]["context"] == {"agent_name": "TestAgent"}
+
+    @pytest.mark.asyncio
+    async def test_get_pending_approvals_empty(self) -> None:
+        """Test get_pending_approvals returns empty list when no pending."""
+
+        async def mock_fetcher() -> list:
+            return []
+
+        task = Task(id="Agent-123", agent_name="Agent", _approval_fetcher=mock_fetcher)
+        result = await task.get_pending_approvals()
+        assert result == []
+
+    @pytest.mark.asyncio
+    async def test_approve_no_sender_raises(self) -> None:
+        """Test approve raises error without sender."""
+        task = Task(id="Agent-123", agent_name="Agent")
+        with pytest.raises(RuntimeError, match="not created via Zap.get_task"):
+            await task.approve("some-id")
+
+    @pytest.mark.asyncio
+    async def test_approve_calls_sender(self) -> None:
+        """Test approve calls sender with (id, True, None)."""
+        calls: list[tuple] = []
+
+        async def mock_sender(approval_id: str, approved: bool, reason: str | None) -> None:
+            calls.append((approval_id, approved, reason))
+
+        task = Task(id="Agent-123", agent_name="Agent", _approval_sender=mock_sender)
+        await task.approve("approval-456")
+
+        assert len(calls) == 1
+        assert calls[0] == ("approval-456", True, None)
+
+    @pytest.mark.asyncio
+    async def test_reject_no_sender_raises(self) -> None:
+        """Test reject raises error without sender."""
+        task = Task(id="Agent-123", agent_name="Agent")
+        with pytest.raises(RuntimeError, match="not created via Zap.get_task"):
+            await task.reject("some-id")
+
+    @pytest.mark.asyncio
+    async def test_reject_calls_sender_with_reason(self) -> None:
+        """Test reject calls sender with (id, False, reason)."""
+        calls: list[tuple] = []
+
+        async def mock_sender(approval_id: str, approved: bool, reason: str | None) -> None:
+            calls.append((approval_id, approved, reason))
+
+        task = Task(id="Agent-123", agent_name="Agent", _approval_sender=mock_sender)
+        await task.reject("approval-789", reason="Amount too high")
+
+        assert len(calls) == 1
+        assert calls[0] == ("approval-789", False, "Amount too high")
+
+    @pytest.mark.asyncio
+    async def test_reject_without_reason(self) -> None:
+        """Test reject calls sender with None reason when not provided."""
+        calls: list[tuple] = []
+
+        async def mock_sender(approval_id: str, approved: bool, reason: str | None) -> None:
+            calls.append((approval_id, approved, reason))
+
+        task = Task(id="Agent-123", agent_name="Agent", _approval_sender=mock_sender)
+        await task.reject("approval-000")
+
+        assert len(calls) == 1
+        assert calls[0] == ("approval-000", False, None)

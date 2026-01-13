@@ -532,3 +532,63 @@ class TestZapContextSupport:
 
             # No warnings should be emitted
             assert len(w) == 0
+
+
+class TestZapGetAgentTools:
+    """Tests for Zap.get_agent_tools method."""
+
+    @pytest.mark.asyncio
+    async def test_get_agent_tools_before_start_raises(self, zap_instance: Zap) -> None:
+        """Test that get_agent_tools before start raises ZapNotStartedError."""
+        with pytest.raises(ZapNotStartedError):
+            await zap_instance.get_agent_tools("TestAgent")
+
+    @pytest.mark.asyncio
+    async def test_get_agent_tools_unknown_agent_raises(self, zap_with_mock_client: Zap) -> None:
+        """Test that unknown agent raises AgentNotFoundError."""
+        await zap_with_mock_client.start()
+        with pytest.raises(AgentNotFoundError):
+            await zap_with_mock_client.get_agent_tools("UnknownAgent")
+
+    @pytest.mark.asyncio
+    async def test_get_agent_tools_returns_tool_names(self, zap_with_mock_client: Zap) -> None:
+        """Test that get_agent_tools returns tool names from registry."""
+        await zap_with_mock_client.start()
+
+        # Mock the tool registry
+        mock_registry = MagicMock()
+        mock_registry.get_tool_names.return_value = ["tool_a", "tool_b", "tool_c"]
+        zap_with_mock_client._tool_registry = mock_registry
+
+        result = await zap_with_mock_client.get_agent_tools("TestAgent")
+
+        assert result == ["tool_a", "tool_b", "tool_c"]
+        mock_registry.get_tool_names.assert_called_once_with("TestAgent")
+
+    @pytest.mark.asyncio
+    async def test_get_agent_tools_no_registry_returns_empty(
+        self, zap_with_mock_client: Zap
+    ) -> None:
+        """Test that get_agent_tools returns empty list if no registry."""
+        await zap_with_mock_client.start()
+
+        # Set registry to None (shouldn't happen in practice, but defensive)
+        zap_with_mock_client._tool_registry = None
+
+        result = await zap_with_mock_client.get_agent_tools("TestAgent")
+
+        assert result == []
+
+    @pytest.mark.asyncio
+    async def test_get_agent_tools_valid_agent_empty_tools(self, zap_with_mock_client: Zap) -> None:
+        """Test that get_agent_tools returns empty list for agent with no tools."""
+        await zap_with_mock_client.start()
+
+        # Mock the tool registry to return empty
+        mock_registry = MagicMock()
+        mock_registry.get_tool_names.return_value = []
+        zap_with_mock_client._tool_registry = mock_registry
+
+        result = await zap_with_mock_client.get_agent_tools("TestAgent")
+
+        assert result == []
