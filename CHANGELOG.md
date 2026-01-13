@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.3.1](https://github.com/zachrobo1/zap-ai/compare/v0.3.0...v0.3.1) (2026-01-13)
+
+
+### Bug Fixes
+
+* **ci:** trigger PyPI deploy from release-please workflow ([33f4139](https://github.com/zachrobo1/zap-ai/commit/33f413948f129a3e25eeb13ed892b6eb99e4322a))
+
 ## [0.3.0](https://github.com/zachrobo1/zap-ai/compare/v0.2.1...v0.3.0) (2026-01-13)
 
 
