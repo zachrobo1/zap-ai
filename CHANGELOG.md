@@ -1,5 +1,25 @@
 # Changelog
 
+## [0.3.0](https://github.com/zachrobo1/zap-ai/compare/v0.2.1...v0.3.0) (2026-01-13)
+
+
+### Features
+
+* add coverage and PyPI badges (v0.3.0) ([4c8485c](https://github.com/zachrobo1/zap-ai/commit/4c8485ca72227b2cb879822d19f5fd53b40a4d2d))
+* add human-in-the-loop approval workflows ([#11](https://github.com/zachrobo1/zap-ai/issues/11)) ([3547b8f](https://github.com/zachrobo1/zap-ai/commit/3547b8f4b6569fffabce11f49aa8c4be84285458))
+* **tracing:** add BaseTracingProvider ABC for extensible tracing ([#10](https://github.com/zachrobo1/zap-ai/issues/10)) ([a47cf49](https://github.com/zachrobo1/zap-ai/commit/a47cf49742d88d3e7f98214c440799d5c5355232))
+
+
+### Bug Fixes
+
+* improve CI coverage and versioning config ([193de3b](https://github.com/zachrobo1/zap-ai/commit/193de3b0dfeceaa06bdd4265982e10fc5d3784db))
+* trigger release-please on push to main ([ec1f2c1](https://github.com/zachrobo1/zap-ai/commit/ec1f2c153173d051f2b08d01cd5833f6d74a03ad))
+
+
+### Documentation
+
+* add MkDocs documentation site with GitHub Pages deployment ([#9](https://github.com/zachrobo1/zap-ai/issues/9)) ([8e8ec6e](https://github.com/zachrobo1/zap-ai/commit/8e8ec6e4df2612c452dfdc1d3975c979c89e19d8))
+
 ## [0.2.1](https://github.com/zachrobo1/zap-ai/compare/v0.2.0...v0.2.1) (2026-01-08)
 
 
