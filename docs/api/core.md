@@ -15,6 +15,7 @@ The main orchestrator class that manages agents and Temporal connections.
         - execute_task
         - get_task
         - get_agent
+        - get_agent_tools
 
 ## ZapAgent
 
@@ -46,6 +47,9 @@ Represents a task execution.
         - get_turn
         - turn_count
         - get_sub_tasks
+        - get_pending_approvals
+        - approve
+        - reject
 
 ## TaskStatus
 

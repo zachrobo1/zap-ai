@@ -719,3 +719,221 @@ class TestAgentWorkflowParallelToolCalls:
             assert "Error:" in tool_messages[1]["content"]
             # Third tool should still have succeeded
             assert tool_messages[2]["content"] == "Success:good_tool2"
+
+
+class TestAgentWorkflowApproval:
+    """Tests for AgentWorkflow approval functionality."""
+
+    @pytest.mark.asyncio
+    async def test_query_pending_approvals_empty(
+        self, workflow_env: WorkflowEnvironment, simple_input: AgentWorkflowInput
+    ) -> None:
+        """Test get_pending_approvals returns empty list initially."""
+        async with Worker(
+            workflow_env.client,
+            task_queue="test-queue",
+            workflows=[AgentWorkflow],
+            activities=[
+                mock_inference_activity,
+                mock_tool_execution_activity,
+                mock_get_agent_config_activity,
+            ],
+        ):
+            handle = await workflow_env.client.start_workflow(
+                AgentWorkflow.run,
+                simple_input,
+                id="test-approval-empty-1",
+                task_queue="test-queue",
+            )
+
+            await handle.result()
+            pending = await handle.query(AgentWorkflow.get_pending_approvals)
+
+            assert pending == []
+
+    @pytest.mark.asyncio
+    async def test_approval_workflow_timeout(self, workflow_env: WorkflowEnvironment) -> None:
+        """Test that approval timeout auto-rejects the tool call."""
+        from datetime import timedelta
+
+        from zap_ai.workflows.models import ApprovalRules
+
+        @activity.defn(name="inference_activity")
+        async def inference_with_approval_tool(input: InferenceInput) -> InferenceOutput:
+            has_tool_result = any(m.get("role") == "tool" for m in input.messages)
+            if has_tool_result:
+                return InferenceOutput(
+                    content="Timeout occurred.",
+                    tool_calls=[],
+                    finish_reason="stop",
+                )
+            return InferenceOutput(
+                content=None,
+                tool_calls=[
+                    {
+                        "id": "call_admin_1",
+                        "type": "function",
+                        "function": {"name": "admin_action", "arguments": "{}"},
+                    }
+                ],
+                finish_reason="tool_calls",
+            )
+
+        @activity.defn(name="tool_execution_activity")
+        async def tool_activity(input: ToolExecutionInput) -> str:
+            return "Should not be called"
+
+        @activity.defn(name="get_agent_config_activity")
+        async def config_activity(agent_name: str) -> AgentConfigOutput:
+            return AgentConfigOutput(
+                agent_name=agent_name,
+                prompt="Test prompt",
+                model="gpt-4o",
+                max_iterations=50,
+                tools=[{"type": "function", "function": {"name": "admin_action"}}],
+            )
+
+        # Use very short timeout for testing
+        input = AgentWorkflowInput(
+            agent_name="TestAgent",
+            initial_task="Do admin action",
+            approval_rules=ApprovalRules(
+                patterns=["admin_*"],
+                timeout=timedelta(seconds=1),  # Very short timeout
+            ).to_dict(),
+        )
+
+        async with Worker(
+            workflow_env.client,
+            task_queue="test-queue",
+            workflows=[AgentWorkflow],
+            activities=[
+                inference_with_approval_tool,
+                tool_activity,
+                config_activity,
+            ],
+        ):
+            handle = await workflow_env.client.start_workflow(
+                AgentWorkflow.run,
+                input,
+                id="test-approval-timeout-1",
+                task_queue="test-queue",
+            )
+
+            # Don't approve - let it timeout
+            # Time-skipping environment should handle this quickly
+            await handle.result()
+
+            # Verify timeout message in history
+            history = await handle.query(AgentWorkflow.get_history)
+            tool_messages = [m for m in history if m.get("role") == "tool"]
+            assert len(tool_messages) == 1
+            assert "timeout" in tool_messages[0]["content"].lower()
+
+    @pytest.mark.asyncio
+    async def test_tools_without_approval_rules_run_parallel(
+        self, workflow_env: WorkflowEnvironment
+    ) -> None:
+        """Test that tools run in parallel when no approval rules are set."""
+        import time
+
+        execution_order: list[tuple[str, float]] = []
+
+        @activity.defn(name="inference_activity")
+        async def inference_with_tools(input: InferenceInput) -> InferenceOutput:
+            has_tool_results = any(m.get("role") == "tool" for m in input.messages)
+            if has_tool_results:
+                return InferenceOutput(
+                    content="All tools done",
+                    tool_calls=[],
+                    finish_reason="stop",
+                )
+            return InferenceOutput(
+                content=None,
+                tool_calls=[
+                    {"id": "1", "function": {"name": "tool_a", "arguments": "{}"}},
+                    {"id": "2", "function": {"name": "tool_b", "arguments": "{}"}},
+                ],
+                finish_reason="tool_calls",
+            )
+
+        @activity.defn(name="tool_execution_activity")
+        async def tracking_tool_activity(input: ToolExecutionInput) -> str:
+            import asyncio
+
+            execution_order.append((input.tool_name, time.time()))
+            await asyncio.sleep(0.05)
+            return f"Result for {input.tool_name}"
+
+        @activity.defn(name="get_agent_config_activity")
+        async def config_activity(agent_name: str) -> AgentConfigOutput:
+            return AgentConfigOutput(
+                agent_name=agent_name,
+                prompt="Test prompt",
+                model="gpt-4o",
+                max_iterations=50,
+                tools=[],
+            )
+
+        # No approval_rules set
+        input = AgentWorkflowInput(
+            agent_name="TestAgent",
+            initial_task="Use tools",
+        )
+
+        async with Worker(
+            workflow_env.client,
+            task_queue="test-queue",
+            workflows=[AgentWorkflow],
+            activities=[
+                inference_with_tools,
+                tracking_tool_activity,
+                config_activity,
+            ],
+        ):
+            await workflow_env.client.execute_workflow(
+                AgentWorkflow.run,
+                input,
+                id="test-parallel-no-approval-1",
+                task_queue="test-queue",
+            )
+
+            # Both tools should have been called
+            assert len(execution_order) == 2
+
+            # They should have started at nearly the same time (parallel)
+            start_times = [t[1] for t in execution_order]
+            time_spread = max(start_times) - min(start_times)
+            assert time_spread < 0.05, f"Tools didn't start together: {time_spread}s"
+
+
+class TestApprovalRulesLogic:
+    """Tests for approval rules pattern matching logic."""
+
+    def test_requires_approval_no_rules(self) -> None:
+        """Test _requires_approval returns False when no rules."""
+        from zap_ai.workflows.models import ApprovalRules
+
+        # ApprovalRules.matches should return True for matching patterns
+        rules = ApprovalRules(patterns=["transfer_*", "delete_*"])
+        assert rules.matches("transfer_funds") is True
+        assert rules.matches("delete_user") is True
+        assert rules.matches("get_balance") is False
+
+    def test_approval_rules_with_wildcards(self) -> None:
+        """Test that wildcard patterns work correctly."""
+        from zap_ai.workflows.models import ApprovalRules
+
+        rules = ApprovalRules(patterns=["*_critical", "admin_*"])
+        assert rules.matches("do_critical") is True
+        assert rules.matches("admin_delete") is True
+        assert rules.matches("safe_action") is False
+
+    def test_approval_rules_exact_match(self) -> None:
+        """Test that exact patterns work correctly."""
+        from zap_ai.workflows.models import ApprovalRules
+
+        rules = ApprovalRules(patterns=["specific_tool"])
+        assert rules.matches("specific_tool") is True
+        assert rules.matches("specific_tool_extra") is False
+        assert rules.matches("other_tool") is False

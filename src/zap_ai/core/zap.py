@@ -27,6 +27,7 @@ if TYPE_CHECKING:
     from temporalio.client import Client as TemporalClient
 
     from zap_ai.mcp import ToolRegistry
+    from zap_ai.workflows.models import ApprovalRequest, ApprovalRules
 
 
 @dataclass
@@ -149,6 +150,43 @@ class Zap(Generic[TContext]):
         """Return list of all agent names."""
         return list(self._agent_map.keys())
 
+    async def get_agent_tools(self, agent_name: str) -> list[str]:
+        """
+        Get list of tool names available to an agent.
+
+        Useful for validating approval patterns before execution.
+
+        Args:
+            agent_name: Name of the agent.
+
+        Returns:
+            List of tool names available to the agent.
+
+        Raises:
+            ZapNotStartedError: If start() hasn't been called.
+            AgentNotFoundError: If agent doesn't exist.
+
+        Example:
+            ```python
+            tools = await zap.get_agent_tools("financial_agent")
+            # ['transfer_funds', 'check_balance', 'delete_transaction']
+
+            # Validate approval patterns
+            rules = ApprovalRules(patterns=["transfer_*"])
+            print(rules.preview_matches(tools))
+            # {'transfer_*': ['transfer_funds']}
+            ```
+        """
+        self._ensure_started()
+
+        # Validate agent exists
+        self.get_agent(agent_name)
+
+        if not self._tool_registry:
+            return []
+
+        return self._tool_registry.get_tool_names(agent_name)
+
     async def start(self) -> None:
         """
         Initialize Temporal connection and MCP clients.
@@ -204,6 +242,7 @@ class Zap(Generic[TContext]):
         task: str | None = None,
         follow_up_on_task: str | None = None,
         context: TContext | None = None,
+        approval_rules: "ApprovalRules | None" = None,
     ) -> Task:
         """
         Execute a new task or follow up on an existing one.
@@ -220,6 +259,9 @@ class Zap(Generic[TContext]):
             context: Optional context to pass to agents with dynamic prompts.
                 Defaults to {} if not provided. Note: agents with callable
                 prompts should be given appropriate context.
+            approval_rules: Optional rules for human-in-the-loop approval.
+                When provided, tool calls matching the patterns will pause
+                for human approval before execution.
 
         Returns:
             Task object with initial state. Use get_task() to poll for updates.
@@ -245,6 +287,20 @@ class Zap(Generic[TContext]):
                 task="Help me with something",
                 context=MyContext(user_name="Alice", company="Acme"),
             )
+            ```
+
+        Example (with approval rules):
+            ```python
+            from zap_ai import ApprovalRules
+
+            task = await zap.execute_task(
+                agent_name="FinancialAgent",
+                task="Transfer $50,000 to vendor",
+                approval_rules=ApprovalRules(patterns=["transfer_*", "delete_*"]),
+            )
+            # Later, check for pending approvals
+            pending = await task.get_pending_approvals()
+            await task.approve(pending[0].id)
             ```
 
         Example (follow-up):
@@ -294,6 +350,18 @@ class Zap(Generic[TContext]):
         if self._tool_registry:
             tools = self._tool_registry.get_tools_for_agent(agent_name)
 
+        # Validate approval rules if provided
+        if approval_rules:
+            tool_names = await self.get_agent_tools(agent_name)
+            unmatched = approval_rules.get_unmatched_patterns(tool_names)
+            if unmatched:
+                warnings.warn(
+                    f"Approval patterns don't match any tools: {unmatched}. "
+                    f"Available tools: {tool_names}",
+                    UserWarning,
+                    stacklevel=2,
+                )
+
         # Start Temporal workflow
         from zap_ai.workflows.agent_workflow import AgentWorkflow
         from zap_ai.workflows.models import AgentWorkflowInput
@@ -306,6 +374,7 @@ class Zap(Generic[TContext]):
                 system_prompt=resolved_prompt,
                 model=agent.model,
                 tools=tools,
+                approval_rules=approval_rules.to_dict() if approval_rules else None,
             ),
             id=task_id,
             task_queue=self.task_queue,
@@ -363,6 +432,36 @@ class Zap(Generic[TContext]):
             return await self.get_task(task_id)
 
         return fetcher
+
+    def _create_approval_fetcher(
+        self, task_id: str
+    ) -> "Callable[[], Awaitable[list[ApprovalRequest]]]":
+        """Create an approval fetcher callback for a specific task."""
+        from zap_ai.workflows.models import ApprovalRequest
+
+        async def fetcher() -> "list[ApprovalRequest]":
+            from zap_ai.workflows.agent_workflow import AgentWorkflow
+
+            handle = self.temporal_client.get_workflow_handle(task_id)  # type: ignore[union-attr]
+            pending_dicts = await handle.query(AgentWorkflow.get_pending_approvals)
+            return [ApprovalRequest.from_dict(d) for d in pending_dicts]
+
+        return fetcher
+
+    def _create_approval_sender(
+        self, task_id: str
+    ) -> "Callable[[str, bool, str | None], Awaitable[None]]":
+        """Create an approval sender callback for a specific task."""
+
+        async def sender(approval_id: str, approved: bool, reason: str | None) -> None:
+            from zap_ai.workflows.agent_workflow import AgentWorkflow
+
+            handle = self.temporal_client.get_workflow_handle(task_id)  # type: ignore[union-attr]
+            await handle.signal(
+                AgentWorkflow.approve_execution, args=[approval_id, approved, reason]
+            )
+
+        return sender
 
     async def get_task(self, task_id: str) -> Task:
         """
@@ -435,6 +534,8 @@ class Zap(Generic[TContext]):
                 history=history,
                 sub_tasks=sub_task_ids,
                 _task_fetcher=self._create_task_fetcher(),
+                _approval_fetcher=self._create_approval_fetcher(task_id),
+                _approval_sender=self._create_approval_sender(task_id),
             )
 
         except Exception as e:

@@ -51,6 +51,18 @@ uv run ruff check --fix .
 uv run pre-commit run --all-files
 ```
 
+## Documentation
+```bash
+# Build docs (with strict mode to catch errors)
+uv run mkdocs build --strict
+
+# Serve docs locally for preview
+uv run mkdocs serve
+
+# Docs are auto-deployed to GitHub Pages on push to main
+# Live at: https://zachrobo1.github.io/zap-ai/
+```
+
 ## Building
 ```bash
 # Build the package
@@ -67,31 +79,48 @@ temporal server start-dev
 
 # Or with headless mode (no UI)
 temporal server start-dev --headless
+
+# Temporal UI available at http://localhost:8233
 ```
 
-## Git Commands (Darwin/macOS)
+## GitHub CLI (gh)
 ```bash
-# Standard git commands work as expected
+# Create a PR
+gh pr create --title "feat: description" --body "..."
+
+# View PR
+gh pr view <number>
+
+# Check PR status
+gh pr status
+
+# List open PRs
+gh pr list
+```
+
+## Git Workflow
+```bash
+# Standard git commands
 git status
 git add .
-git commit -m "message"
+git commit -m "feat: description"  # Use conventional commits
 git push
-git pull
+
+# View recent commits
 git log --oneline -10
-git diff
+
+# View diff vs main
+git diff main
+
+# Branch from main
+git checkout main && git pull && git checkout -b feature/my-feature
 ```
 
-## System Commands (Darwin/macOS)
-```bash
-# List directory contents
-ls -la
-
-# Find files
-find . -name "*.py" -type f
-
-# Search in files
-grep -r "pattern" src/
-
-# View file
-cat filename
-```
+## Conventional Commits
+Use these prefixes for commits (triggers release-please versioning):
+- `feat:` - New feature (minor version bump)
+- `fix:` - Bug fix (patch version bump)
+- `docs:` - Documentation only
+- `refactor:` - Code refactoring
+- `test:` - Adding tests
+- `chore:` - Maintenance tasks
