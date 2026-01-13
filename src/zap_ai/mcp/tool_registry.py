@@ -268,6 +268,28 @@ class ToolRegistry:
             raise KeyError(f"Agent '{agent_name}' not registered")
         return self._agent_tools[agent_name]
 
+    def get_tool_names(self, agent_name: str) -> list[str]:
+        """
+        Get list of tool names available to an agent.
+
+        Useful for validating approval patterns.
+
+        Args:
+            agent_name: Name of the agent.
+
+        Returns:
+            List of tool names available to the agent.
+            Returns empty list if agent has no tools.
+
+        Raises:
+            KeyError: If agent not registered.
+        """
+        if agent_name not in self._agent_tools:
+            raise KeyError(
+                f"Agent '{agent_name}' not registered. Available: {list(self._agent_tools.keys())}"
+            )
+        return self._agent_tools[agent_name].tool_names
+
     def has_message_agent_tool(self, agent_name: str) -> bool:
         """
         Check if an agent has the message_agent tool.

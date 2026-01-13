@@ -48,6 +48,7 @@ from zap_ai.exceptions import (
     ZapConfigurationError,
     ZapNotStartedError,
 )
+from zap_ai.workflows.models import ApprovalRequest, ApprovalRules
 
 __version__ = version("zap-ai")
 
@@ -59,6 +60,9 @@ __all__ = [
     "TaskStatus",
     "ToolCallInfo",
     "ConversationTurn",
+    # Approval workflow types
+    "ApprovalRules",
+    "ApprovalRequest",
     # Exceptions
     "ZapConfigurationError",
     "ZapNotStartedError",

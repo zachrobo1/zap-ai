@@ -151,3 +151,182 @@ async def integration_worker_with_tools(
 def task_queue_tools(integration_worker_with_tools: Worker) -> str:
     """Get the task queue for the tool-calling worker."""
     return integration_worker_with_tools.task_queue
+
+
+# -----------------------------------------------------------------------------
+# Approval workflow mocks
+# -----------------------------------------------------------------------------
+
+
+async def _mock_inference_with_approval_tool(input: InferenceInput) -> InferenceOutput:
+    """
+    Mock inference that returns a tool requiring approval.
+
+    First call: returns delete_file tool call
+    Subsequent calls: returns completion text
+    """
+    has_tool_result = any(m.get("role") == "tool" for m in input.messages)
+    if has_tool_result:
+        return InferenceOutput(
+            content="Task completed after approval.",
+            tool_calls=[],
+            finish_reason="stop",
+        )
+    return InferenceOutput(
+        content=None,
+        tool_calls=[
+            {
+                "id": "call_delete_123",
+                "type": "function",
+                "function": {
+                    "name": "delete_file",
+                    "arguments": '{"path": "/tmp/test.txt"}',
+                },
+            }
+        ],
+        finish_reason="tool_calls",
+    )
+
+
+mock_inference_activity_with_approval = activity.defn(name="inference_activity")(
+    _mock_inference_with_approval_tool
+)
+
+
+@pytest.fixture
+async def integration_worker_with_approval(
+    temporal_client: Client,
+) -> AsyncGenerator[Worker, None]:
+    """
+    Create a worker that uses the approval-triggering mock inference activity.
+
+    This mock returns a delete_file tool call that triggers approval when
+    ApprovalRules(patterns=["delete_*"]) is set.
+    """
+    task_queue = f"integration-test-approval-{uuid.uuid4().hex[:8]}"
+
+    worker = Worker(
+        temporal_client,
+        task_queue=task_queue,
+        workflows=[AgentWorkflow],
+        activities=[
+            mock_inference_activity_with_approval,
+            mock_tool_execution_activity,
+            mock_get_agent_config_activity,
+        ],
+    )
+
+    async with worker:
+        yield worker
+
+
+@pytest.fixture
+def task_queue_approval(integration_worker_with_approval: Worker) -> str:
+    """Get the task queue for the approval-testing worker."""
+    return integration_worker_with_approval.task_queue
+
+
+async def _mock_inference_subagent_then_approval(input: InferenceInput) -> InferenceOutput:
+    """
+    Mock inference for sub-agent + approval testing.
+
+    For MainAgent (parent workflow):
+    1. First call: returns message_agent tool call to delegate to SubAgent
+    2. Second call: returns transfer_funds tool call (requires approval)
+    3. Third call: returns completion text
+
+    For SubAgent (child workflow):
+    - Just returns a simple response immediately
+    """
+    messages = input.messages
+    tool_results = [m for m in messages if m.get("role") == "tool"]
+
+    # Check if this is the SubAgent by looking at the system prompt
+    system_msg = next((m for m in messages if m.get("role") == "system"), None)
+    is_subagent = system_msg and "SubAgent" in system_msg.get("content", "")
+
+    if is_subagent:
+        # SubAgent just returns a simple response
+        return InferenceOutput(
+            content="SubAgent completed the helper task successfully.",
+            tool_calls=[],
+            finish_reason="stop",
+        )
+
+    # MainAgent logic
+    if len(tool_results) == 0:
+        # First: delegate to sub-agent
+        return InferenceOutput(
+            content=None,
+            tool_calls=[
+                {
+                    "id": "call_subagent_1",
+                    "type": "function",
+                    "function": {
+                        "name": "message_agent",
+                        "arguments": '{"agent_name": "SubAgent", "message": "Do something"}',
+                    },
+                }
+            ],
+            finish_reason="tool_calls",
+        )
+    elif len(tool_results) == 1:
+        # Second: tool requiring approval
+        return InferenceOutput(
+            content=None,
+            tool_calls=[
+                {
+                    "id": "call_transfer_1",
+                    "type": "function",
+                    "function": {
+                        "name": "transfer_funds",
+                        "arguments": '{"amount": 1000}',
+                    },
+                }
+            ],
+            finish_reason="tool_calls",
+        )
+    else:
+        # Third: completion
+        return InferenceOutput(
+            content="All done with sub-agent and approval!",
+            tool_calls=[],
+            finish_reason="stop",
+        )
+
+
+mock_inference_activity_subagent_approval = activity.defn(name="inference_activity")(
+    _mock_inference_subagent_then_approval
+)
+
+
+@pytest.fixture
+async def integration_worker_subagent_approval(
+    temporal_client: Client,
+) -> AsyncGenerator[Worker, None]:
+    """
+    Create a worker for sub-agent + approval testing.
+
+    This mock first delegates to a sub-agent, then calls a tool requiring approval.
+    """
+    task_queue = f"integration-test-subagent-approval-{uuid.uuid4().hex[:8]}"
+
+    worker = Worker(
+        temporal_client,
+        task_queue=task_queue,
+        workflows=[AgentWorkflow],
+        activities=[
+            mock_inference_activity_subagent_approval,
+            mock_tool_execution_activity,
+            mock_get_agent_config_activity,
+        ],
+    )
+
+    async with worker:
+        yield worker
+
+
+@pytest.fixture
+def task_queue_subagent_approval(integration_worker_subagent_approval: Worker) -> str:
+    """Get the task queue for the sub-agent + approval testing worker."""
+    return integration_worker_subagent_approval.task_queue

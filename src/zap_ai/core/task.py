@@ -11,6 +11,7 @@ from typing import TYPE_CHECKING, Any
 
 if TYPE_CHECKING:
     from zap_ai.conversation import ConversationTurn, ToolCallInfo
+    from zap_ai.workflows.models import ApprovalRequest
 
 
 class TaskStatus(str, Enum):
@@ -20,6 +21,9 @@ class TaskStatus(str, Enum):
     The lifecycle of a task typically follows:
     PENDING -> THINKING -> (AWAITING_TOOL <-> THINKING)* -> COMPLETED
 
+    With approval rules enabled, the lifecycle may include:
+    THINKING -> AWAITING_APPROVAL -> (approved) -> AWAITING_TOOL
+
     At any point, a task can transition to FAILED if an unrecoverable
     error occurs.
 
@@ -28,6 +32,9 @@ class TaskStatus(str, Enum):
         THINKING: Agent is thinking (LLM inference in progress).
         AWAITING_TOOL: Waiting for one or more tool executions to complete.
             Includes sub-agent delegation via message_agent tool.
+        AWAITING_APPROVAL: Tool call requires human approval before execution.
+            Use Task.get_pending_approvals() to see pending requests, and
+            Task.approve() or Task.reject() to respond.
         COMPLETED: Task finished successfully. Result is available.
         FAILED: Task failed with an error. Error details available in
             Task.error field.
@@ -36,6 +43,7 @@ class TaskStatus(str, Enum):
     PENDING = "pending"
     THINKING = "thinking"
     AWAITING_TOOL = "awaiting_tool"
+    AWAITING_APPROVAL = "awaiting_approval"
     COMPLETED = "completed"
     FAILED = "failed"
 
@@ -45,7 +53,7 @@ class TaskStatus(str, Enum):
 
     def is_active(self) -> bool:
         """Return True if the task is actively being processed."""
-        return self in (TaskStatus.THINKING, TaskStatus.AWAITING_TOOL)
+        return self in (TaskStatus.THINKING, TaskStatus.AWAITING_TOOL, TaskStatus.AWAITING_APPROVAL)
 
 
 @dataclass
@@ -109,6 +117,14 @@ class Task:
 
     # Private: callback to fetch sub-tasks (injected by Zap)
     _task_fetcher: Callable[[str], Awaitable["Task"]] | None = field(
+        default=None, repr=False, compare=False
+    )
+
+    # Private: callbacks for approval operations (injected by Zap)
+    _approval_fetcher: Callable[[], Awaitable[list["ApprovalRequest"]]] | None = field(
+        default=None, repr=False, compare=False
+    )
+    _approval_sender: Callable[[str, bool, str | None], Awaitable[None]] | None = field(
         default=None, repr=False, compare=False
     )
 
@@ -233,3 +249,91 @@ class Task:
         # Fetch all sub-tasks concurrently
         tasks = [self._task_fetcher(sub_id) for sub_id in self.sub_tasks]
         return list(await asyncio.gather(*tasks))
+
+    async def get_pending_approvals(self) -> list[dict[str, Any]]:
+        """
+        Get all pending approval requests for this task.
+
+        This method requires the Task to have been created via `zap.get_task()`,
+        which injects the necessary callback for fetching approval data.
+
+        Returns:
+            List of dicts with approval request data:
+            - id: Unique approval ID
+            - tool_name: Name of the tool requiring approval
+            - tool_args: Arguments passed to the tool
+            - requested_at: ISO timestamp of when approval was requested
+            - timeout_at: ISO timestamp of when approval will timeout
+            - context: Additional context (agent_name, workflow_id)
+
+        Raises:
+            RuntimeError: If Task was not created via Zap.get_task().
+
+        Example:
+            ```python
+            task = await zap.get_task(task_id)
+            pending = await task.get_pending_approvals()
+            for req in pending:
+                print(f"Tool: {req['tool_name']}, Args: {req['tool_args']}")
+                await task.approve(req['id'])
+            ```
+        """
+        if not self._approval_fetcher:
+            raise RuntimeError(
+                "Cannot fetch approvals: Task was not created via Zap.get_task(). "
+                "Use zap.get_task(task_id) to get a Task with approval access."
+            )
+
+        requests = await self._approval_fetcher()
+        return [r.to_dict() for r in requests]
+
+    async def approve(self, approval_id: str) -> None:
+        """
+        Approve a pending tool execution.
+
+        Args:
+            approval_id: ID of the approval request to approve.
+
+        Raises:
+            RuntimeError: If Task was not created via Zap.get_task().
+
+        Example:
+            ```python
+            task = await zap.get_task(task_id)
+            pending = await task.get_pending_approvals()
+            await task.approve(pending[0]['id'])
+            ```
+        """
+        if not self._approval_sender:
+            raise RuntimeError(
+                "Cannot send approval: Task was not created via Zap.get_task(). "
+                "Use zap.get_task(task_id) to get a Task with approval access."
+            )
+
+        await self._approval_sender(approval_id, True, None)
+
+    async def reject(self, approval_id: str, reason: str | None = None) -> None:
+        """
+        Reject a pending tool execution.
+
+        Args:
+            approval_id: ID of the approval request to reject.
+            reason: Optional reason for rejection.
+
+        Raises:
+            RuntimeError: If Task was not created via Zap.get_task().
+
+        Example:
+            ```python
+            task = await zap.get_task(task_id)
+            pending = await task.get_pending_approvals()
+            await task.reject(pending[0]['id'], reason="Amount exceeds limit")
+            ```
+        """
+        if not self._approval_sender:
+            raise RuntimeError(
+                "Cannot send rejection: Task was not created via Zap.get_task(). "
+                "Use zap.get_task(task_id) to get a Task with approval access."
+            )
+
+        await self._approval_sender(approval_id, False, reason)

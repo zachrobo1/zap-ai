@@ -1,4 +1,4 @@
-# Zap - Zach's Agent Platform
+# Zap - Zach's Agent Platform ⚡️
 
 Zap is an opinionated library for building **resilient AI agents** on top of [Temporal](https://temporal.io/). It provides a scalable, fault-tolerant way to create AI agents that can power demanding use cases and complex architectures.
 
@@ -11,6 +11,7 @@ LLM providers can't yet guarantee production-level SLAs. API calls fail, rate li
 - **Automatic retries** with configurable policies for LLM and tool calls
 - **State persistence** - agents survive crashes and can resume mid-conversation
 - **Sub-agent delegation** - compose complex systems from specialized agents
+- **Human-in-the-loop approvals** - require human oversight for high-stakes tool calls
 - **MCP integration** - easily add tools via the Model Context Protocol
 - **Provider agnostic** - use any LLM supported by LiteLLM (OpenAI, Anthropic, etc.)
 - **Observability** - built-in tracing support with Langfuse integration
@@ -61,4 +62,5 @@ asyncio.run(main())
 
 - [Installation](getting-started/installation.md) - Get Zap installed
 - [Quick Start](getting-started/quickstart.md) - Build your first agent
+- [Approval Workflows](guides/approval-workflows.md) - Human-in-the-loop oversight
 - [API Reference](api/index.md) - Detailed API documentation

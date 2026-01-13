@@ -13,6 +13,9 @@ from temporalio.common import RetryPolicy
 from zap_ai.core.task import TaskStatus
 from zap_ai.workflows.models import (
     AgentWorkflowInput,
+    ApprovalDecision,
+    ApprovalRequest,
+    ApprovalRules,
     ConversationState,
     SubAgentConversation,
     SubAgentResponse,
@@ -60,6 +63,9 @@ class AgentWorkflow:
         self._system_prompt: str = ""
         self._max_iterations: int = 50
         self._tools: list[dict[str, Any]] = []
+
+        # Approval rules (set in run())
+        self._approval_rules: ApprovalRules | None = None
 
         # Pending messages from signals
         self._pending_messages: list[str] = []
@@ -109,6 +115,11 @@ class AgentWorkflow:
             for k, v in self._state.sub_agent_conversations.items()
         }
 
+    @workflow.query
+    def get_pending_approvals(self) -> list[dict[str, Any]]:
+        """Query pending approval requests."""
+        return [req.to_dict() for req in self._state.pending_approvals.values()]
+
     # -------------------------------------------------------------------------
     # Signals
     # -------------------------------------------------------------------------
@@ -132,6 +143,31 @@ class AgentWorkflow:
         """
         self._pending_messages.append(message)
 
+    @workflow.signal
+    async def approve_execution(
+        self, approval_id: str, approved: bool, reason: str | None = None
+    ) -> None:
+        """
+        Signal to approve or reject a pending tool execution.
+
+        Args:
+            approval_id: ID of the approval request.
+            approved: Whether to approve (True) or reject (False).
+            reason: Optional reason for rejection.
+        """
+        if approval_id not in self._state.pending_approvals:
+            return  # Unknown approval ID, ignore
+
+        # Record the decision
+        self._state.approval_decisions[approval_id] = ApprovalDecision(
+            approved=approved,
+            reason=reason,
+            decided_at=workflow.now(),
+        )
+
+        # Remove from pending
+        self._state.pending_approvals.pop(approval_id, None)
+
     # -------------------------------------------------------------------------
     # Main Run Method
     # -------------------------------------------------------------------------
@@ -153,6 +189,9 @@ class AgentWorkflow:
         self._model = input.model
         self._tools = input.tools
         self._max_iterations = input.max_iterations
+        self._approval_rules = (
+            ApprovalRules.from_dict(input.approval_rules) if input.approval_rules else None
+        )
 
         if input.state:
             self._state = ConversationState.from_dict(input.state)
@@ -292,9 +331,13 @@ class AgentWorkflow:
 
     async def _handle_tool_calls(self, tool_calls: list[dict[str, Any]]) -> None:
         """
-        Execute all tool calls in parallel and add results to history.
+        Execute all tool calls and add results to history.
 
-        Both MCP tools and message_agent calls run concurrently via asyncio.gather.
+        When approval rules are active, tools requiring approval are processed
+        sequentially, waiting for human approval before execution.
+
+        Both MCP tools and message_agent calls run concurrently via asyncio.gather
+        when no approvals are pending.
 
         Args:
             tool_calls: List of tool call dicts from LLM response.
@@ -302,7 +345,37 @@ class AgentWorkflow:
         if not tool_calls:
             return
 
-        # Build coroutines for all tool calls
+        # If no approval rules, use fast parallel path
+        if not self._approval_rules:
+            await self._execute_tool_calls_parallel(tool_calls)
+            return
+
+        # With approval rules, process tools that need approval sequentially
+        for tc in tool_calls:
+            func = tc.get("function", {})
+            tool_name = func.get("name", "unknown")
+            tool_call_id = tc.get("id", "")
+
+            # Check if this tool requires approval
+            if self._requires_approval(tool_name):
+                result = await self._execute_with_approval(tc)
+            elif tool_name == "message_agent":
+                result = await self._handle_message_agent(tc)
+                result = result.to_tool_result()
+            else:
+                result = await self._execute_mcp_tool(tc)
+
+            self._state.messages.append(
+                {
+                    "role": "tool",
+                    "tool_call_id": tool_call_id,
+                    "name": tool_name,
+                    "content": result if not isinstance(result, Exception) else f"Error: {result}",
+                }
+            )
+
+    async def _execute_tool_calls_parallel(self, tool_calls: list[dict[str, Any]]) -> None:
+        """Execute all tool calls in parallel (no approval checks)."""
         tasks: list = []
         for tc in tool_calls:
             func = tc.get("function", {})
@@ -311,10 +384,8 @@ class AgentWorkflow:
             else:
                 tasks.append(self._execute_mcp_tool(tc))
 
-        # Execute ALL tools in parallel
         results = await asyncio.gather(*tasks, return_exceptions=True)
 
-        # Process results in order (matching tool_call_ids)
         for tc, result in zip(tool_calls, results):
             tool_call_id = tc.get("id", "")
             func = tc.get("function", {})
@@ -323,7 +394,6 @@ class AgentWorkflow:
             if isinstance(result, Exception):
                 content = f"Error: {result}"
             elif tool_name == "message_agent":
-                # SubAgentResponse has to_tool_result method
                 content = result.to_tool_result()
             else:
                 content = result
@@ -336,6 +406,86 @@ class AgentWorkflow:
                     "content": content,
                 }
             )
+
+    def _requires_approval(self, tool_name: str) -> bool:
+        """Check if a tool requires human approval."""
+        if not self._approval_rules:
+            return False
+        return self._approval_rules.matches(tool_name)
+
+    async def _execute_with_approval(self, tool_call: dict[str, Any]) -> str:
+        """
+        Execute a tool call after obtaining human approval.
+
+        Creates an approval request, waits for approval or timeout,
+        then executes the tool if approved.
+
+        Args:
+            tool_call: The tool call requiring approval.
+
+        Returns:
+            Tool result string, or rejection/timeout message.
+        """
+        func = tool_call.get("function", {})
+        tool_name = func.get("name", "")
+        args_raw = func.get("arguments", "{}")
+
+        try:
+            arguments = json.loads(args_raw) if isinstance(args_raw, str) else args_raw
+        except json.JSONDecodeError:
+            arguments = {}
+
+        # Create approval request (use workflow-safe deterministic methods)
+        approval_id = str(workflow.uuid4())
+        now = workflow.now()
+        timeout = self._approval_rules.timeout if self._approval_rules else timedelta(days=7)
+
+        request = ApprovalRequest(
+            id=approval_id,
+            tool_name=tool_name,
+            tool_args=arguments,
+            requested_at=now,
+            timeout_at=now + timeout,
+            context={
+                "agent_name": self._agent_name,
+                "workflow_id": workflow.info().workflow_id,
+            },
+        )
+
+        # Add to pending approvals
+        self._state.pending_approvals[approval_id] = request
+
+        # Update status to awaiting approval
+        self._status = TaskStatus.AWAITING_APPROVAL
+
+        # Wait for approval decision or timeout
+        try:
+            await workflow.wait_condition(
+                lambda: approval_id in self._state.approval_decisions,
+                timeout=timeout,
+            )
+        except asyncio.TimeoutError:
+            # Timeout - auto-reject and continue
+            self._state.pending_approvals.pop(approval_id, None)
+            self._status = TaskStatus.AWAITING_TOOL
+            return f"[Tool call rejected: approval timeout after {timeout}]"
+
+        # Get the decision
+        decision = self._state.approval_decisions.get(approval_id)
+
+        # Restore status
+        self._status = TaskStatus.AWAITING_TOOL
+
+        if not decision or not decision.approved:
+            reason = decision.reason if decision else "Unknown reason"
+            return f"[Tool call rejected: {reason}]"
+
+        # Approved - execute the tool
+        if tool_name == "message_agent":
+            result = await self._handle_message_agent(tool_call)
+            return result.to_tool_result()
+        else:
+            return await self._execute_mcp_tool(tool_call)
 
     async def _execute_mcp_tool(self, tool_call: dict[str, Any]) -> str:
         """Execute a single MCP tool via activity."""

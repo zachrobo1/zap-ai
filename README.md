@@ -6,6 +6,8 @@
 
 Zap is an opinionated library for building **resilient AI agents** on top of [Temporal](https://temporal.io/). It provides a scalable, fault-tolerant way to create AI agents that can power demanding use cases and complex architectures.
 
+Looking for the full docs? Find them [here](https://zachrobo1.github.io/zap-ai/).
+
 ## Why Zap?
 
 LLM providers can't yet guarantee production-level SLAs. API calls fail, rate limits hit, and connections drop. Zap solves this by running your agents on Temporal—a fault-tolerant code execution platform that captures state and retries failed steps automatically.
@@ -14,6 +16,7 @@ LLM providers can't yet guarantee production-level SLAs. API calls fail, rate li
 - **Automatic retries** with configurable policies for LLM and tool calls
 - **State persistence** - agents survive crashes and can resume mid-conversation
 - **Sub-agent delegation** - compose complex systems from specialized agents
+- **Human-in-the-loop approvals** - require human oversight for high-stakes tool calls
 - **MCP integration** - easily add tools via the Model Context Protocol
 - **Provider agnostic** - use any LLM supported by LiteLLM (OpenAI, Anthropic, etc.)
 - **Observability** - built-in tracing support with Langfuse integration
@@ -280,8 +283,53 @@ When an agent has sub-agents configured, a special `transfer_to_agent` tool is a
 | `PENDING` | Task created, workflow hasn't started yet |
 | `THINKING` | Agent is processing (LLM inference in progress) |
 | `AWAITING_TOOL` | Waiting for tool execution (includes sub-agent delegation) |
+| `AWAITING_APPROVAL` | Waiting for human approval on a tool call |
 | `COMPLETED` | Task finished successfully |
 | `FAILED` | Task failed with an error |
+
+## Human-in-the-Loop Approvals
+
+For high-stakes operations, require human approval before tool execution:
+
+```python
+from datetime import timedelta
+from zap_ai import ApprovalRules
+
+# Execute with approval rules
+task = await zap.execute_task(
+    agent_name="FinancialAgent",
+    task="Transfer $50,000 to vendor",
+    approval_rules=ApprovalRules(
+        patterns=["transfer_*", "delete_*"],  # Glob patterns
+        timeout=timedelta(days=7),
+    ),
+)
+
+# Check for pending approvals
+task = await zap.get_task(task.id)
+if task.status == TaskStatus.AWAITING_APPROVAL:
+    pending = await task.get_pending_approvals()
+    for req in pending:
+        print(f"Tool: {req['tool_name']}")
+        print(f"Args: {req['tool_args']}")
+
+        # Approve or reject
+        await task.approve(req['id'])
+        # Or: await task.reject(req['id'], reason="Amount too high")
+```
+
+**Features:**
+- **Durable** - Pending approvals survive worker restarts
+- **Timeouts** - Auto-reject after configurable duration
+- **Pattern matching** - Use glob patterns to match tool names
+- **Tool discovery** - Preview which tools match your patterns
+
+```python
+# Discover tools and validate patterns
+tools = await zap.get_agent_tools("FinancialAgent")
+rules = ApprovalRules(patterns=["transfer_*"])
+print(rules.preview_matches(tools))  # See what matches
+```
 
 ## Conversation History API
 
@@ -374,9 +422,9 @@ Zap supports tracing via a pluggable provider system. Langfuse is included out o
 ## Future Plans
 
 - Real-time streaming via callbacks/webhooks
-- Human-in-the-loop tools (approval workflows)
 - Hooks system for custom logic injection
 - Expose agents as MCP servers for agent-to-agent communication
+- Approval UI dashboard for managing approval queues
 
 ## Examples
 
