@@ -78,3 +78,15 @@ class LLMProviderError(ZapError):
     """Raised when LLM provider call fails."""
 
     pass
+
+
+class VisionNotSupportedError(ZapError):
+    """
+    Raised when attempting to use images with a model that doesn't support vision.
+
+    This error occurs when:
+    - A task contains image content but the agent's model doesn't support vision
+    - A tool returns image content but the agent's model doesn't support vision
+    """
+
+    pass

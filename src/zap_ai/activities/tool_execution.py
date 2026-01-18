@@ -30,6 +30,7 @@ class AgentConfigOutput:
         model: LLM model identifier.
         max_iterations: Maximum agentic loop iterations.
         tools: List of tool definitions in LiteLLM format.
+        supports_vision: Whether the model supports vision/image inputs.
     """
 
     agent_name: str
@@ -39,6 +40,7 @@ class AgentConfigOutput:
     temperature: float = 0.7
     max_tokens: int | None = None
     tools: list[dict[str, Any]] = field(default_factory=list)
+    supports_vision: bool = False
 
 
 @dataclass
@@ -176,12 +178,14 @@ async def get_agent_config_activity(agent_name: str) -> AgentConfigOutput:
         agent_name: Name of the agent to get config for.
 
     Returns:
-        AgentConfigOutput with prompt, model, and tools.
+        AgentConfigOutput with prompt, model, tools, and vision support.
 
     Raises:
         KeyError: If agent not found.
         RuntimeError: If tool registry is not initialized.
     """
+    from zap_ai.llm.provider import supports_vision
+
     activity.logger.info(f"Getting config for agent '{agent_name}'")
 
     registry = get_tool_registry()
@@ -205,4 +209,5 @@ async def get_agent_config_activity(agent_name: str) -> AgentConfigOutput:
         temperature=config.temperature,
         max_tokens=config.max_tokens,
         tools=tools,
+        supports_vision=supports_vision(config.model),
     )

@@ -35,6 +35,7 @@ nav:
       - Dynamic Prompts: guides/dynamic-prompts.md
       - Multi-Agent Systems: guides/multi-agent.md
       - Approval Workflows: guides/approval-workflows.md
+      - Multimodal Vision: guides/multimodal-vision.md
       - Observability: guides/observability.md
   - API Reference:
       - Overview: api/index.md

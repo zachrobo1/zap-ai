@@ -15,6 +15,7 @@ Zap is an opinionated library for building **resilient AI agents** on top of Tem
 - **Observability** - built-in tracing support with Langfuse integration (extensible via BaseTracingProvider ABC)
 - **Dynamic prompts** - context-aware prompts resolved at runtime
 - **Conversation history API** - rich access to turns, tool calls, and text content
+- **Multimodal/Vision support** - send images to vision-capable models with automatic capability validation
 
 ## Tech Stack
 - **Python 3.11+** - Core language
@@ -61,7 +62,7 @@ src/zap_ai/
 ├── llm/                # LLM provider abstraction
 │   ├── __init__.py
 │   ├── provider.py     # LiteLLM wrapper
-│   └── message_types.py # Message, ToolCall, InferenceResult
+│   └── message_types.py # Message, ToolCall, InferenceResult, TextContent, ImageContent, ContentPart
 ├── mcp/                # MCP client management and tool registry
 │   ├── __init__.py
 │   ├── client_manager.py # FastMCP client lifecycle
@@ -91,6 +92,12 @@ src/zap_ai/
 - `ToolCallInfo` - Information about a tool call and its result
 - `ConversationTurn` - A single turn in the conversation
 
+### Multimodal Content
+- `TextContent` - Text content part in a multimodal message
+- `ImageContent` - Image content part with `from_url()` and `from_base64()` factory methods
+- `ContentPart` - Type alias: `TextContent | ImageContent`
+- `MessageContent` - Type alias: `str | list[ContentPart]` (backwards compatible with text-only)
+
 ### Approval Workflows
 - `ApprovalRules` - Glob patterns for tools requiring approval, with timeout
 - `ApprovalRequest` - Pending approval request with tool name, args, timestamps
@@ -108,6 +115,7 @@ All exceptions inherit from `ZapError`:
 - `ZapNotStartedError` - Operations before start()
 - `AgentNotFoundError` - Unknown agent reference
 - `TaskNotFoundError` - Unknown task reference
+- `VisionNotSupportedError` - Images sent to non-vision model
 - `ToolNotFoundError` - Tool not found
 - `ToolExecutionError` - Tool execution failure
 - `ClientConnectionError` - MCP client connection failure

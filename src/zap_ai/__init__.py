@@ -45,10 +45,17 @@ from zap_ai.core import (
 from zap_ai.exceptions import (
     AgentNotFoundError,
     TaskNotFoundError,
+    VisionNotSupportedError,
     ZapConfigurationError,
     ZapNotStartedError,
 )
 from zap_ai.workflows.models import ApprovalRequest, ApprovalRules
+from zap_ai.llm.message_types import (
+    ContentPart,
+    ImageContent,
+    MessageContent,
+    TextContent,
+)
 
 __version__ = version("zap-ai")
 
@@ -63,11 +70,17 @@ __all__ = [
     # Approval workflow types
     "ApprovalRules",
     "ApprovalRequest",
+    # Multimodal types
+    "TextContent",
+    "ImageContent",
+    "ContentPart",
+    "MessageContent",
     # Exceptions
     "ZapConfigurationError",
     "ZapNotStartedError",
     "AgentNotFoundError",
     "TaskNotFoundError",
+    "VisionNotSupportedError",
     # Types
     "TContext",
     "DefaultContext",

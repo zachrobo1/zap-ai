@@ -39,6 +39,23 @@ with workflow.unsafe.imports_passed_through():
     )
 
 
+def _message_contains_images(message: str | list[dict[str, Any]]) -> bool:
+    """
+    Check if a message contains image content.
+
+    Args:
+        message: Text string or list of content parts (LiteLLM format).
+
+    Returns:
+        True if message contains image_url content parts.
+    """
+    if isinstance(message, str):
+        return False
+    return any(
+        isinstance(part, dict) and part.get("type") == "image_url" for part in message
+    )
+
+
 @workflow.defn
 class AgentWorkflow:
     """
@@ -69,8 +86,8 @@ class AgentWorkflow:
         # Approval rules (set in run())
         self._approval_rules: ApprovalRules | None = None
 
-        # Pending messages from signals
-        self._pending_messages: list[str] = []
+        # Pending messages from signals (text or multimodal content)
+        self._pending_messages: list[str | list[dict[str, Any]]] = []
 
         # Tracing context (set in run())
         self._trace_context: TraceContext | None = None
@@ -127,21 +144,28 @@ class AgentWorkflow:
     # -------------------------------------------------------------------------
 
     @workflow.signal
-    async def add_message(self, message: str) -> None:
+    async def add_message(self, message: str | list[dict[str, Any]]) -> None:
         """
         Signal to add a follow-up message.
 
         Used for task follow-ups from the parent Zap instance.
+        Supports both text and multimodal content.
+
+        Args:
+            message: Text string or list of content parts (for multimodal).
         """
         self._pending_messages.append(message)
 
     @workflow.signal
-    async def sub_agent_message(self, message: str) -> None:
+    async def sub_agent_message(self, message: str | list[dict[str, Any]]) -> None:
         """
         Signal to receive a message from parent (for child workflows).
 
         Used when this workflow is a sub-agent receiving follow-up
-        messages from its parent.
+        messages from its parent. Supports both text and multimodal content.
+
+        Args:
+            message: Text string or list of content parts (for multimodal).
         """
         self._pending_messages.append(message)
 
@@ -544,7 +568,8 @@ class AgentWorkflow:
         except json.JSONDecodeError:
             args = {}
 
-        message = args.get("message", "")
+        # Message can be text string or multimodal content (list of dicts)
+        message: str | list[dict[str, Any]] = args.get("message", "")
         conversation_id = args.get("conversation_id")
         agent_name = args.get("agent_name")
 
@@ -563,9 +588,15 @@ class AgentWorkflow:
             )
 
     async def _start_sub_agent_conversation(
-        self, agent_name: str, message: str
+        self, agent_name: str, message: str | list[dict[str, Any]]
     ) -> SubAgentResponse:
-        """Start a new conversation with a sub-agent."""
+        """
+        Start a new conversation with a sub-agent.
+
+        Args:
+            agent_name: Name of the sub-agent to message.
+            message: Text or multimodal content to send.
+        """
         # Get the sub-agent's configuration via activity
         agent_config: AgentConfigOutput = await workflow.execute_activity(
             get_agent_config_activity,
@@ -573,17 +604,28 @@ class AgentWorkflow:
             start_to_close_timeout=timedelta(seconds=30),
         )
 
+        # Validate vision support if message contains images
+        if _message_contains_images(message) and not agent_config.supports_vision:
+            return SubAgentResponse(
+                conversation_id="",
+                agent_name=agent_name,
+                response=f"Error: Model '{agent_config.model}' does not support vision. "
+                f"Cannot send message with images to sub-agent '{agent_name}'.",
+                is_complete=True,
+            )
+
         # Generate conversation ID (child workflow ID)
         parent_id = workflow.info().workflow_id
         short_uuid = workflow.uuid4().hex[:8]
         conversation_id = f"{parent_id}-{agent_name}-{short_uuid}"
 
-        # Track the conversation
+        # Track the conversation (including vision support for future messages)
         self._state.sub_agent_conversations[conversation_id] = SubAgentConversation(
             conversation_id=conversation_id,
             agent_name=agent_name,
             messages=[{"role": "user", "content": message}],
             is_active=True,
+            supports_vision=agent_config.supports_vision,
         )
 
         # Start child workflow with full agent config and parent trace context
@@ -619,9 +661,15 @@ class AgentWorkflow:
         )
 
     async def _continue_sub_agent_conversation(
-        self, conversation_id: str, message: str
+        self, conversation_id: str, message: str | list[dict[str, Any]]
     ) -> SubAgentResponse:
-        """Continue an existing conversation with a sub-agent."""
+        """
+        Continue an existing conversation with a sub-agent.
+
+        Args:
+            conversation_id: ID of the existing conversation.
+            message: Text or multimodal content to send.
+        """
         conv = self._state.sub_agent_conversations.get(conversation_id)
 
         if not conv:
@@ -637,6 +685,16 @@ class AgentWorkflow:
                 conversation_id=conversation_id,
                 agent_name=conv.agent_name,
                 response="Error: Conversation has ended",
+                is_complete=True,
+            )
+
+        # Validate vision support if message contains images
+        if _message_contains_images(message) and not conv.supports_vision:
+            return SubAgentResponse(
+                conversation_id=conversation_id,
+                agent_name=conv.agent_name,
+                response=f"Error: Sub-agent '{conv.agent_name}' does not support vision. "
+                f"Cannot send message with images.",
                 is_complete=True,
             )
 

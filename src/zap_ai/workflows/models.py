@@ -154,7 +154,8 @@ class AgentWorkflowInput:
 
     Attributes:
         agent_name: Name of the agent to run.
-        initial_task: The initial task/message from the user.
+        initial_task: The initial task/message from the user. Can be a text
+            string or a list of content parts (for multimodal input with images).
         system_prompt: The agent's system prompt.
         model: LLM model identifier (default: gpt-4o).
         tools: List of tool definitions available to the agent.
@@ -166,7 +167,7 @@ class AgentWorkflowInput:
     """
 
     agent_name: str
-    initial_task: str
+    initial_task: str | list[dict[str, Any]]  # Text or multimodal content parts
     system_prompt: str = ""
     model: str = "gpt-4o"
     tools: list[dict[str, Any]] = field(default_factory=list)
@@ -189,12 +190,14 @@ class SubAgentConversation:
         agent_name: Name of the sub-agent.
         messages: History of messages in this conversation.
         is_active: Whether the child workflow is still running.
+        supports_vision: Whether the sub-agent's model supports vision/images.
     """
 
     conversation_id: str
     agent_name: str
     messages: list[dict[str, Any]] = field(default_factory=list)
     is_active: bool = True
+    supports_vision: bool = False
 
 
 @dataclass
@@ -243,7 +246,8 @@ class ConversationState:
 
     messages: list[dict[str, Any]] = field(default_factory=list)
     iteration_count: int = 0
-    pending_messages: list[str] = field(default_factory=list)
+    # Pending messages can be text strings or multimodal content (list of dicts)
+    pending_messages: list[str | list[dict[str, Any]]] = field(default_factory=list)
     sub_agent_conversations: dict[str, SubAgentConversation] = field(default_factory=dict)
     trace_context: dict[str, Any] | None = None
     pending_approvals: dict[str, ApprovalRequest] = field(default_factory=dict)
@@ -261,6 +265,7 @@ class ConversationState:
                     "agent_name": v.agent_name,
                     "messages": v.messages,
                     "is_active": v.is_active,
+                    "supports_vision": v.supports_vision,
                 }
                 for k, v in self.sub_agent_conversations.items()
             },
@@ -279,6 +284,7 @@ class ConversationState:
                 agent_name=v["agent_name"],
                 messages=v["messages"],
                 is_active=v["is_active"],
+                supports_vision=v.get("supports_vision", False),
             )
 
         pending_approvals: dict[str, ApprovalRequest] = {}

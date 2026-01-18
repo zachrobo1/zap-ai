@@ -4,11 +4,14 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
+from zap_ai.exceptions import VisionNotSupportedError
 from zap_ai.llm.message_types import Message
 from zap_ai.llm.provider import (
     LLMProviderError,
     complete,
     convert_messages_to_litellm,
+    supports_vision,
+    validate_vision_support,
 )
 
 
@@ -327,3 +330,102 @@ class TestLLMProviderError:
         """Test error message is preserved."""
         error = LLMProviderError("API rate limit exceeded")
         assert str(error) == "API rate limit exceeded"
+
+
+class TestSupportsVision:
+    """Tests for supports_vision function."""
+
+    def test_supports_vision_true(self) -> None:
+        """Test supports_vision returns True for vision-capable model."""
+        with patch("zap_ai.llm.provider.litellm") as mock_litellm:
+            mock_litellm.supports_vision.return_value = True
+
+            result = supports_vision("anthropic/claude-sonnet-4-20250514")
+
+            assert result is True
+            mock_litellm.supports_vision.assert_called_once_with(
+                "anthropic/claude-sonnet-4-20250514"
+            )
+
+    def test_supports_vision_false(self) -> None:
+        """Test supports_vision returns False for non-vision model."""
+        with patch("zap_ai.llm.provider.litellm") as mock_litellm:
+            mock_litellm.supports_vision.return_value = False
+
+            result = supports_vision("gpt-3.5-turbo")
+
+            assert result is False
+
+    def test_supports_vision_handles_exception(self) -> None:
+        """Test supports_vision returns False on error."""
+        with patch("zap_ai.llm.provider.litellm") as mock_litellm:
+            mock_litellm.supports_vision.side_effect = Exception("API error")
+
+            result = supports_vision("unknown-model")
+
+            assert result is False
+
+
+class TestValidateVisionSupport:
+    """Tests for validate_vision_support function."""
+
+    def test_validates_text_only_messages_passes(self) -> None:
+        """Test that text-only messages pass validation."""
+        messages = [
+            {"role": "user", "content": "Hello"},
+            {"role": "assistant", "content": "Hi there"},
+        ]
+
+        # Should not raise
+        validate_vision_support("gpt-3.5-turbo", messages)
+
+    def test_validates_images_with_vision_model_passes(self) -> None:
+        """Test that images pass with vision-capable model."""
+        messages = [
+            {
+                "role": "user",
+                "content": [
+                    {"type": "text", "text": "What's this?"},
+                    {"type": "image_url", "image_url": {"url": "https://example.com/img.png"}},
+                ],
+            }
+        ]
+
+        with patch("zap_ai.llm.provider.litellm") as mock_litellm:
+            mock_litellm.supports_vision.return_value = True
+
+            # Should not raise
+            validate_vision_support("gpt-4o", messages)
+
+    def test_raises_for_images_without_vision_support(self) -> None:
+        """Test that images raise error with non-vision model."""
+        messages = [
+            {
+                "role": "user",
+                "content": [
+                    {"type": "text", "text": "What's this?"},
+                    {"type": "image_url", "image_url": {"url": "https://example.com/img.png"}},
+                ],
+            }
+        ]
+
+        with patch("zap_ai.llm.provider.litellm") as mock_litellm:
+            mock_litellm.supports_vision.return_value = False
+
+            with pytest.raises(VisionNotSupportedError, match="does not support vision"):
+                validate_vision_support("gpt-3.5-turbo", messages)
+
+    def test_ignores_non_image_content_lists(self) -> None:
+        """Test that content lists without images pass."""
+        messages = [
+            {
+                "role": "user",
+                "content": [
+                    {"type": "text", "text": "Hello"},
+                    {"type": "text", "text": "World"},
+                ],
+            }
+        ]
+
+        # Should not raise even without vision support
+        validate_vision_support("gpt-3.5-turbo", messages)
