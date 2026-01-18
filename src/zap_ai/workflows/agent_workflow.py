@@ -62,6 +62,8 @@ class AgentWorkflow:
         self._model: str = "gpt-4o"
         self._system_prompt: str = ""
         self._max_iterations: int = 50
+        self._temperature: float = 0.7
+        self._max_tokens: int | None = None
         self._tools: list[dict[str, Any]] = []
 
         # Approval rules (set in run())
@@ -189,6 +191,8 @@ class AgentWorkflow:
         self._model = input.model
         self._tools = input.tools
         self._max_iterations = input.max_iterations
+        self._temperature = input.temperature
+        self._max_tokens = input.max_tokens
         self._approval_rules = (
             ApprovalRules.from_dict(input.approval_rules) if input.approval_rules else None
         )
@@ -255,6 +259,8 @@ class AgentWorkflow:
                         model=self._model,
                         tools=self._tools,
                         max_iterations=self._max_iterations,
+                        temperature=self._temperature,
+                        max_tokens=self._max_tokens,
                         state=self._state.to_dict(),
                         parent_workflow_id=input.parent_workflow_id,
                     )
@@ -315,6 +321,8 @@ class AgentWorkflow:
                 model=self._model,
                 messages=self._state.messages,
                 tools=self._tools,
+                temperature=self._temperature,
+                max_tokens=self._max_tokens,
                 trace_context=self._trace_context.to_dict() if self._trace_context else None,
             ),
             start_to_close_timeout=timedelta(seconds=120),
@@ -588,6 +596,8 @@ class AgentWorkflow:
                 model=agent_config.model,
                 tools=agent_config.tools,
                 max_iterations=agent_config.max_iterations,
+                temperature=agent_config.temperature,
+                max_tokens=agent_config.max_tokens,
                 parent_workflow_id=parent_id,
                 parent_trace_context=self._trace_context.to_dict() if self._trace_context else None,
             ),

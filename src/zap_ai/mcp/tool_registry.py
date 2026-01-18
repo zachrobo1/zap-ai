@@ -25,12 +25,16 @@ class AgentConfig:
         prompt: System prompt for the agent.
         model: LLM model identifier.
         max_iterations: Maximum agentic loop iterations.
+        temperature: Sampling temperature for LLM responses.
+        max_tokens: Maximum tokens to generate.
     """
 
     agent_name: str
     prompt: str
     model: str
     max_iterations: int
+    temperature: float = 0.7
+    max_tokens: int | None = None
 
 
 @dataclass
@@ -195,6 +199,8 @@ class ToolRegistry:
             prompt=agent.prompt,
             model=agent.model,
             max_iterations=agent.max_iterations,
+            temperature=agent.temperature,
+            max_tokens=agent.max_tokens,
         )
 
         self._agent_tools[agent.name] = AgentTools(

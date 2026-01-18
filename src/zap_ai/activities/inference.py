@@ -29,6 +29,8 @@ class InferenceInput:
     model: str
     messages: list[dict[str, Any]] = field(default_factory=list)
     tools: list[dict[str, Any]] = field(default_factory=list)
+    temperature: float = 0.7
+    max_tokens: int | None = None
     trace_context: dict[str, Any] | None = None
 
 
@@ -103,6 +105,8 @@ async def inference_activity(input: InferenceInput) -> InferenceOutput:
             model=input.model,
             messages=input.messages,
             tools=input.tools if input.tools else None,
+            temperature=input.temperature,
+            max_tokens=input.max_tokens,
         )
 
         activity.logger.info(

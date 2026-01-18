@@ -36,6 +36,8 @@ class AgentConfigOutput:
     prompt: str
     model: str
     max_iterations: int
+    temperature: float = 0.7
+    max_tokens: int | None = None
     tools: list[dict[str, Any]] = field(default_factory=list)
 
 
@@ -200,5 +202,7 @@ async def get_agent_config_activity(agent_name: str) -> AgentConfigOutput:
         prompt=config.prompt,
         model=config.model,
         max_iterations=config.max_iterations,
+        temperature=config.temperature,
+        max_tokens=config.max_tokens,
         tools=tools,
     )

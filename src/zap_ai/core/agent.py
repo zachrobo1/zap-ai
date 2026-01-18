@@ -67,6 +67,12 @@ class ZapAgent(BaseModel, Generic[TContext]):
         max_iterations: Maximum number of agentic loop iterations before
             forcing completion. Prevents infinite loops. Each iteration
             is one LLM call + optional tool execution.
+        temperature: Sampling temperature for LLM responses (0.0-2.0).
+            Lower values (e.g., 0.2) make output more focused and deterministic.
+            Higher values (e.g., 0.8) make output more random and creative.
+            Defaults to 0.7.
+        max_tokens: Maximum number of tokens to generate in the response.
+            If None (default), uses the model's default limit.
     """
 
     model_config = ConfigDict(arbitrary_types_allowed=True)
@@ -110,6 +116,17 @@ class ZapAgent(BaseModel, Generic[TContext]):
         ge=1,
         le=500,
         description="Maximum agentic loop iterations",
+    )
+    temperature: float = Field(
+        default=0.7,
+        ge=0.0,
+        le=2.0,
+        description="Sampling temperature for LLM responses (0.0-2.0)",
+    )
+    max_tokens: int | None = Field(
+        default=None,
+        ge=1,
+        description="Maximum tokens to generate (None for model default)",
     )
 
     @field_validator("name")

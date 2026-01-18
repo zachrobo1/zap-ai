@@ -171,6 +171,8 @@ class AgentWorkflowInput:
     model: str = "gpt-4o"
     tools: list[dict[str, Any]] = field(default_factory=list)
     max_iterations: int = 50
+    temperature: float = 0.7
+    max_tokens: int | None = None
     state: dict[str, Any] | None = None
     parent_workflow_id: str | None = None
     parent_trace_context: dict[str, Any] | None = None
