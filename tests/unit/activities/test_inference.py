@@ -124,6 +124,8 @@ class TestInferenceActivity:
             model="gpt-4o",
             messages=[{"role": "user", "content": "Hello, world!"}],
             tools=None,
+            temperature=0.7,
+            max_tokens=None,
         )
         assert result is not None
         assert isinstance(result, InferenceOutput)
@@ -148,6 +150,8 @@ class TestInferenceActivity:
             model="gpt-4o",
             messages=[{"role": "user", "content": "Hello"}],
             tools=tools,
+            temperature=0.7,
+            max_tokens=None,
         )
 
     @pytest.mark.asyncio
@@ -205,4 +209,6 @@ class TestInferenceActivity:
             model="gpt-4o",
             messages=[{"role": "user", "content": "Hello"}],
             tools=None,
+            temperature=0.7,
+            max_tokens=None,
         )

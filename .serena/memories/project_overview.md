@@ -83,7 +83,7 @@ src/zap_ai/
 
 ### Core
 - `Zap` - Main orchestrator that manages agents and Temporal connections
-- `ZapAgent[TContext]` - Configuration for an AI agent (name, prompt, model, tools, sub-agents)
+- `ZapAgent[TContext]` - Configuration for an AI agent (name, prompt, model, tools, sub-agents, temperature, max_tokens)
 - `Task` - Represents an executing or completed task with rich inspection methods
 
 ### Task Inspection
