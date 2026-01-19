@@ -164,6 +164,7 @@ class AgentWorkflowInput:
         parent_workflow_id: If this is a child workflow, the parent's ID.
         parent_trace_context: Parent trace context for sub-agent linking.
         approval_rules: Optional rules for human-in-the-loop approval.
+        tool_descriptions: Mapping of tool names to descriptions for streaming phrases.
     """
 
     agent_name: str
@@ -178,6 +179,7 @@ class AgentWorkflowInput:
     parent_workflow_id: str | None = None
     parent_trace_context: dict[str, Any] | None = None
     approval_rules: dict[str, Any] | None = None  # Serialized ApprovalRules
+    tool_descriptions: dict[str, str] = field(default_factory=dict)
 
 
 @dataclass

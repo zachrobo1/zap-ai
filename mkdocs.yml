@@ -34,6 +34,7 @@ nav:
   - Guides:
       - Dynamic Prompts: guides/dynamic-prompts.md
       - Multi-Agent Systems: guides/multi-agent.md
+      - Streaming Events: guides/streaming.md
       - Approval Workflows: guides/approval-workflows.md
       - Multimodal Vision: guides/multimodal-vision.md
       - Observability: guides/observability.md
@@ -41,6 +42,7 @@ nav:
       - Overview: api/index.md
       - Core: api/core.md
       - Conversation: api/conversation.md
+      - Streaming: api/streaming.md
       - Tracing: api/tracing.md
       - Worker: api/worker.md
       - Exceptions: api/exceptions.md

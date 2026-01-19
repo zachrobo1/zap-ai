@@ -11,6 +11,7 @@ from temporalio import workflow
 from temporalio.common import RetryPolicy
 
 from zap_ai.core.task import TaskStatus
+from zap_ai.streaming.events import generate_tool_phrase
 from zap_ai.workflows.models import (
     AgentWorkflowInput,
     ApprovalDecision,
@@ -81,6 +82,9 @@ class AgentWorkflow:
         self._max_tokens: int | None = None
         self._tools: list[dict[str, Any]] = []
 
+        # Tool descriptions for streaming phrases (set in run())
+        self._tool_descriptions: dict[str, str] = {}
+
         # Approval rules (set in run())
         self._approval_rules: ApprovalRules | None = None
 
@@ -89,6 +93,10 @@ class AgentWorkflow:
 
         # Tracing context (set in run())
         self._trace_context: TraceContext | None = None
+
+        # Streaming event buffer
+        self._events: list[dict[str, Any]] = []
+        self._event_seq: int = 0
 
     # -------------------------------------------------------------------------
     # Queries
@@ -136,6 +144,47 @@ class AgentWorkflow:
     def get_pending_approvals(self) -> list[dict[str, Any]]:
         """Query pending approval requests."""
         return [req.to_dict() for req in self._state.pending_approvals.values()]
+
+    @workflow.query
+    def get_events(self, since_seq: int = 0) -> list[dict[str, Any]]:
+        """
+        Query streaming events since a given sequence number.
+
+        Args:
+            since_seq: Return only events with seq > since_seq.
+
+        Returns:
+            List of event dicts ordered by sequence number.
+        """
+        return [e for e in self._events if e["seq"] > since_seq]
+
+    # -------------------------------------------------------------------------
+    # Streaming Event Helpers
+    # -------------------------------------------------------------------------
+
+    def _emit_event(self, event_type: str, **kwargs: Any) -> None:
+        """
+        Emit a streaming event to the buffer.
+
+        Events are buffered in workflow state and can be queried via get_events().
+        The buffer is bounded to prevent unbounded growth.
+
+        Args:
+            event_type: Type of event (thinking, tool_call, tool_result, completed, error).
+            **kwargs: Additional event data.
+        """
+        self._event_seq += 1
+        self._events.append(
+            {
+                "seq": self._event_seq,
+                "type": event_type,
+                "timestamp": workflow.now().isoformat(),
+                **kwargs,
+            }
+        )
+        # Bound buffer to last 500 events to prevent unbounded growth
+        if len(self._events) > 1000:
+            self._events = self._events[-500:]
 
     # -------------------------------------------------------------------------
     # Signals
@@ -215,6 +264,7 @@ class AgentWorkflow:
         self._max_iterations = input.max_iterations
         self._temperature = input.temperature
         self._max_tokens = input.max_tokens
+        self._tool_descriptions = input.tool_descriptions
         self._approval_rules = (
             ApprovalRules.from_dict(input.approval_rules) if input.approval_rules else None
         )
@@ -285,6 +335,7 @@ class AgentWorkflow:
                         max_tokens=self._max_tokens,
                         state=self._state.to_dict(),
                         parent_workflow_id=input.parent_workflow_id,
+                        tool_descriptions=self._tool_descriptions,
                     )
                 )
 
@@ -296,11 +347,13 @@ class AgentWorkflow:
 
             # Run inference
             self._status = TaskStatus.THINKING
+            self._emit_event("thinking", iteration=self._state.iteration_count)
             try:
                 inference_result = await self._run_inference()
             except Exception as e:
                 self._error = f"Inference failed: {e}"
                 self._status = TaskStatus.FAILED
+                self._emit_event("error", error=self._error)
                 return ""
 
             # Add assistant response to history
@@ -315,6 +368,7 @@ class AgentWorkflow:
             if not inference_result.tool_calls:
                 self._result = inference_result.content
                 self._status = TaskStatus.COMPLETED
+                self._emit_event("completed", result=self._result or "")
                 break
 
             # Handle tool calls
@@ -327,6 +381,7 @@ class AgentWorkflow:
         if self._state.iteration_count >= self._max_iterations:
             self._error = f"Max iterations ({self._max_iterations}) reached"
             self._status = TaskStatus.FAILED
+            self._emit_event("error", error=self._error)
 
         return self._result or ""
 
@@ -385,6 +440,24 @@ class AgentWorkflow:
             func = tc.get("function", {})
             tool_name = func.get("name", "unknown")
             tool_call_id = tc.get("id", "")
+            args_raw = func.get("arguments", "{}")
+
+            # Parse arguments for event emission
+            try:
+                arguments = json.loads(args_raw) if isinstance(args_raw, str) else args_raw
+            except json.JSONDecodeError:
+                arguments = {}
+
+            # Emit tool_call event
+            description = self._tool_descriptions.get(tool_name, "")
+            phrase = generate_tool_phrase(tool_name, description, arguments)
+            self._emit_event(
+                "tool_call",
+                name=tool_name,
+                arguments=arguments,
+                phrase=phrase,
+                tool_call_id=tool_call_id,
+            )
 
             # Check if this tool requires approval
             if self._requires_approval(tool_name):
@@ -395,17 +468,51 @@ class AgentWorkflow:
             else:
                 result = await self._execute_mcp_tool(tc)
 
+            # Emit tool_result event
+            is_error = isinstance(result, Exception)
+            result_content = result if not is_error else f"Error: {result}"
+            self._emit_event(
+                "tool_result",
+                name=tool_name,
+                result=str(result_content)[:1000],  # Truncate large results
+                tool_call_id=tool_call_id,
+                success=not is_error,
+            )
+
             self._state.messages.append(
                 {
                     "role": "tool",
                     "tool_call_id": tool_call_id,
                     "name": tool_name,
-                    "content": result if not isinstance(result, Exception) else f"Error: {result}",
+                    "content": result_content,
                 }
             )
 
     async def _execute_tool_calls_parallel(self, tool_calls: list[dict[str, Any]]) -> None:
         """Execute all tool calls in parallel (no approval checks)."""
+        # Emit tool_call events for all tools before execution
+        for tc in tool_calls:
+            func = tc.get("function", {})
+            tool_name = func.get("name", "unknown")
+            tool_call_id = tc.get("id", "")
+            args_raw = func.get("arguments", "{}")
+
+            try:
+                arguments = json.loads(args_raw) if isinstance(args_raw, str) else args_raw
+            except json.JSONDecodeError:
+                arguments = {}
+
+            description = self._tool_descriptions.get(tool_name, "")
+            phrase = generate_tool_phrase(tool_name, description, arguments)
+            self._emit_event(
+                "tool_call",
+                name=tool_name,
+                arguments=arguments,
+                phrase=phrase,
+                tool_call_id=tool_call_id,
+            )
+
+        # Execute all tools in parallel
         tasks: list = []
         for tc in tool_calls:
             func = tc.get("function", {})
@@ -423,10 +530,22 @@ class AgentWorkflow:
 
             if isinstance(result, Exception):
                 content = f"Error: {result}"
+                success = False
             elif tool_name == "message_agent":
                 content = result.to_tool_result()
+                success = True
             else:
                 content = result
+                success = True
+
+            # Emit tool_result event
+            self._emit_event(
+                "tool_result",
+                name=tool_name,
+                result=str(content)[:1000],  # Truncate large results
+                tool_call_id=tool_call_id,
+                success=success,
+            )
 
             self._state.messages.append(
                 {

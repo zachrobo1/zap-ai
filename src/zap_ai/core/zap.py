@@ -2,7 +2,9 @@
 
 from __future__ import annotations
 
+import asyncio
 import warnings
+from collections.abc import AsyncIterator
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Any, Awaitable, Callable, Generic
 from uuid import uuid4
@@ -32,6 +34,7 @@ if TYPE_CHECKING:
     from temporalio.client import Client as TemporalClient
 
     from zap_ai.mcp import ToolRegistry
+    from zap_ai.streaming.events import Event
     from zap_ai.workflows.models import ApprovalRequest, ApprovalRules
 
 
@@ -409,8 +412,10 @@ class Zap(Generic[TContext]):
 
         # Get tools for this agent
         tools: list[dict[str, Any]] = []
+        tool_descriptions: dict[str, str] = {}
         if self._tool_registry:
             tools = self._tool_registry.get_tools_for_agent(agent_name)
+            tool_descriptions = self._tool_registry.get_tool_descriptions(agent_name)
 
         # Validate approval rules if provided
         if approval_rules:
@@ -443,6 +448,7 @@ class Zap(Generic[TContext]):
                 temperature=agent.temperature,
                 max_tokens=agent.max_tokens,
                 approval_rules=approval_rules.to_dict() if approval_rules else None,
+                tool_descriptions=tool_descriptions,
             ),
             id=task_id,
             task_queue=self.task_queue,
@@ -453,6 +459,126 @@ class Zap(Generic[TContext]):
             agent_name=agent_name,
             status=TaskStatus.PENDING,
         )
+
+    async def stream_task(
+        self,
+        agent_name: str | None = None,
+        task: str | None = None,
+        task_content: MessageContent | None = None,
+        context: TContext | None = None,
+        approval_rules: "ApprovalRules | None" = None,
+        *,
+        poll_interval: float = 0.1,
+        include_thinking: bool = True,
+        include_tool_events: bool = True,
+    ) -> "AsyncIterator[Event]":
+        """
+        Execute a task and stream events as an async generator.
+
+        This method starts a task and yields streaming events as they occur,
+        allowing real-time progress monitoring. Events are polled from the
+        workflow via Temporal queries at the specified interval.
+
+        Args:
+            agent_name: Name of the agent to execute the task.
+            task: The task description/prompt (text only).
+            task_content: Multimodal task content (text + images).
+            context: Optional context for agents with dynamic prompts.
+            approval_rules: Optional rules for human-in-the-loop approval.
+            poll_interval: How often to poll for new events (seconds). Default 0.1.
+            include_thinking: Whether to yield ThinkingEvent. Default True.
+            include_tool_events: Whether to yield ToolCallEvent and ToolResultEvent.
+                Default True.
+
+        Yields:
+            Event objects in order: ThinkingEvent, ToolCallEvent, ToolResultEvent,
+            and finally CompletedEvent or ErrorEvent.
+
+        Raises:
+            ZapNotStartedError: If start() hasn't been called.
+            AgentNotFoundError: If agent_name doesn't exist.
+            VisionNotSupportedError: If task contains images but model doesn't
+                support vision.
+            ValueError: If required arguments are missing.
+
+        Example:
+            ```python
+            async for event in zap.stream_task(
+                agent_name="MainAgent",
+                task="What's the weather in Paris?"
+            ):
+                match event:
+                    case ThinkingEvent(iteration=n):
+                        print(f"Thinking (iteration {n})...")
+                    case ToolCallEvent(phrase=phrase):
+                        print(phrase)  # "Getting weather for Paris..."
+                    case ToolResultEvent(name=name, success=success):
+                        print(f"Tool {name}: {'OK' if success else 'FAILED'}")
+                    case CompletedEvent(result=result):
+                        print(f"Done: {result}")
+                    case ErrorEvent(error=error):
+                        print(f"Error: {error}")
+            ```
+        """
+        from zap_ai.streaming.events import (
+            CompletedEvent,
+            ErrorEvent,
+            ThinkingEvent,
+            ToolCallEvent,
+            ToolResultEvent,
+            parse_event,
+        )
+        from zap_ai.workflows.agent_workflow import AgentWorkflow
+
+        # Start the task
+        task_obj = await self.execute_task(
+            agent_name=agent_name,
+            task=task,
+            task_content=task_content,
+            context=context,
+            approval_rules=approval_rules,
+        )
+
+        # Get workflow handle for querying events
+        handle = self.temporal_client.get_workflow_handle(task_obj.id)  # type: ignore[union-attr]
+        last_seq = 0
+
+        while True:
+            await asyncio.sleep(poll_interval)
+
+            try:
+                events = await handle.query(AgentWorkflow.get_events, last_seq)
+            except Exception:
+                # Workflow may have completed - check for final state
+                try:
+                    status_str = await handle.query(AgentWorkflow.get_status)
+                    if status_str == TaskStatus.COMPLETED.value:
+                        result = await handle.query(AgentWorkflow.get_result)
+                        yield CompletedEvent(result=result or "", task_id=task_obj.id)
+                        return
+                    elif status_str == TaskStatus.FAILED.value:
+                        error = await handle.query(AgentWorkflow.get_error)
+                        yield ErrorEvent(error=error or "Unknown error", task_id=task_obj.id)
+                        return
+                except Exception:
+                    pass
+                continue
+
+            for event_data in events:
+                last_seq = event_data["seq"]
+                event = parse_event(event_data, task_obj.id)
+
+                # Apply filters
+                if not include_thinking and isinstance(event, ThinkingEvent):
+                    continue
+                if not include_tool_events and isinstance(event, (ToolCallEvent, ToolResultEvent)):
+                    continue
+
+                yield event
+
+                # Terminal events end the loop
+                if isinstance(event, (CompletedEvent, ErrorEvent)):
+                    return
 
     async def _follow_up_task(self, task_id: str, message: MessageContent) -> Task:
         """

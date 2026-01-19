@@ -296,6 +296,48 @@ class ToolRegistry:
             )
         return self._agent_tools[agent_name].tool_names
 
+    def get_tool_descriptions(self, agent_name: str) -> dict[str, str]:
+        """
+        Get mapping of tool names to descriptions for an agent.
+
+        Used for generating human-readable streaming event phrases.
+
+        Args:
+            agent_name: Name of the agent.
+
+        Returns:
+            Dict mapping tool names to their descriptions.
+            Returns empty dict if agent has no tools.
+
+        Raises:
+            KeyError: If agent not registered.
+        """
+        if agent_name not in self._agent_tools:
+            raise KeyError(
+                f"Agent '{agent_name}' not registered. Available: {list(self._agent_tools.keys())}"
+            )
+
+        descriptions: dict[str, str] = {}
+        agent_tools = self._agent_tools[agent_name]
+
+        # Extract descriptions from MCP tools (LiteLLM format)
+        for tool in agent_tools.mcp_tools:
+            func_def = tool.get("function", {})
+            name = func_def.get("name", "")
+            description = func_def.get("description", "")
+            if name:
+                descriptions[name] = description
+
+        # Add message_agent tool description if present
+        if agent_tools.message_agent_tool:
+            func_def = agent_tools.message_agent_tool.get("function", {})
+            name = func_def.get("name", "")
+            description = func_def.get("description", "")
+            if name:
+                descriptions[name] = description
+
+        return descriptions
+
     def has_message_agent_tool(self, agent_name: str) -> bool:
         """
         Check if an agent has the message_agent tool.

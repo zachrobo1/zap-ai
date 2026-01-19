@@ -16,6 +16,7 @@ Zap is an opinionated library for building **resilient AI agents** on top of Tem
 - **Dynamic prompts** - context-aware prompts resolved at runtime
 - **Conversation history API** - rich access to turns, tool calls, and text content
 - **Multimodal/Vision support** - send images to vision-capable models with automatic capability validation
+- **Streaming support** - async generator API for real-time event streaming during task execution
 
 ## Tech Stack
 - **Python 3.11+** - Core language
@@ -68,6 +69,9 @@ src/zap_ai/
 │   ├── client_manager.py # FastMCP client lifecycle
 │   ├── schema_converter.py # MCP to LiteLLM schema conversion
 │   └── tool_registry.py # Tool discovery and caching (get_tools_for_agent)
+├── streaming/          # Streaming event support
+│   ├── __init__.py     # Exports streaming types
+│   └── events.py       # Event dataclasses (ThinkingEvent, ToolCallEvent, etc.)
 ├── tracing/            # Observability providers
 │   ├── __init__.py     # Global provider registry (set_tracing_provider, get_tracing_provider)
 │   ├── protocol.py     # TracingProvider protocol, TraceContext
@@ -97,6 +101,15 @@ src/zap_ai/
 - `ImageContent` - Image content part with `from_url()` and `from_base64()` factory methods
 - `ContentPart` - Type alias: `TextContent | ImageContent`
 - `MessageContent` - Type alias: `str | list[ContentPart]` (backwards compatible with text-only)
+
+### Streaming Events
+- `StreamEvent` - Base class for all streaming events (with type, timestamp, task_id, seq)
+- `ThinkingEvent` - Emitted when LLM starts reasoning (iteration number)
+- `ToolCallEvent` - Emitted when a tool is called (name, arguments, phrase)
+- `ToolResultEvent` - Emitted when tool execution completes (name, result, success)
+- `TokenEvent` - Individual token streaming (Phase 2, not yet implemented)
+- `CompletedEvent` - Task completed successfully (result)
+- `ErrorEvent` - Task failed (error message)
 
 ### Approval Workflows
 - `ApprovalRules` - Glob patterns for tools requiring approval, with timeout
@@ -128,10 +141,21 @@ All exceptions inherit from `ZapError`:
 3. `zap.execute_task()` starts a Temporal workflow for the agent
 4. The workflow runs an agentic loop:
    - LLM inference → check approval rules → tool execution → repeat
+   - Events are emitted to workflow state at each step (thinking, tool_call, tool_result, completed, error)
 5. Approval pauses: if tool matches `ApprovalRules`, workflow waits for signal
 6. Sub-agents are executed as child workflows (via `message_agent` tool)
 7. State is persisted in Temporal, surviving crashes
 8. `continue-as-new` prevents event history from growing unbounded
+9. `stream_task()` polls workflow via Temporal query to yield events in real-time
+
+## Zap Methods
+- `start()` - Connect to Temporal, initialize MCP clients
+- `stop()` - Graceful shutdown
+- `execute_task()` - Start a task and return Task object
+- `stream_task()` - Execute task and stream events via async generator
+- `get_task()` - Retrieve task by ID
+- `get_agent()` - Get agent configuration
+- `get_agent_tools()` - Get tools available to an agent
 
 ## Task Methods (on Task object)
 - `get_text_content()` - All text from user + assistant messages
