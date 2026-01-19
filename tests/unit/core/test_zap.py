@@ -592,3 +592,304 @@ class TestZapGetAgentTools:
         result = await zap_with_mock_client.get_agent_tools("TestAgent")
 
         assert result == []
+
+
+class TestZapStreamTask:
+    """Test stream_task method."""
+
+    @pytest.mark.asyncio
+    async def test_stream_before_start_raises(self, zap_instance: Zap) -> None:
+        """Test that stream_task before start raises ZapNotStartedError."""
+        with pytest.raises(ZapNotStartedError):
+            async for _ in zap_instance.stream_task(agent_name="TestAgent", task="Hello"):
+                pass
+
+    @pytest.mark.asyncio
+    async def test_stream_yields_events_in_order(
+        self, zap_with_mock_client: Zap, mock_temporal_client: MagicMock
+    ) -> None:
+        """Test that stream_task yields events in order."""
+        from zap_ai.streaming.events import CompletedEvent, ThinkingEvent, ToolCallEvent
+
+        mock_handle = AsyncMock()
+        # First poll: return thinking and tool_call events
+        # Second poll: return completed event
+        mock_handle.query = AsyncMock(
+            side_effect=[
+                # First get_events call
+                [
+                    {"seq": 1, "type": "thinking", "iteration": 1, "timestamp": "t1"},
+                    {
+                        "seq": 2,
+                        "type": "tool_call",
+                        "name": "search",
+                        "arguments": {},
+                        "phrase": "Searching...",
+                        "tool_call_id": "tc1",
+                        "timestamp": "t2",
+                    },
+                ],
+                # Second get_events call
+                [
+                    {"seq": 3, "type": "completed", "result": "Done!", "timestamp": "t3"},
+                ],
+            ]
+        )
+        mock_temporal_client.get_workflow_handle.return_value = mock_handle
+
+        await zap_with_mock_client.start()
+
+        events = []
+        async for event in zap_with_mock_client.stream_task(
+            agent_name="TestAgent", task="Hello", poll_interval=0.001
+        ):
+            events.append(event)
+
+        assert len(events) == 3
+        assert isinstance(events[0], ThinkingEvent)
+        assert events[0].iteration == 1
+        assert isinstance(events[1], ToolCallEvent)
+        assert events[1].name == "search"
+        assert isinstance(events[2], CompletedEvent)
+        assert events[2].result == "Done!"
+
+    @pytest.mark.asyncio
+    async def test_stream_filters_thinking_events(
+        self, zap_with_mock_client: Zap, mock_temporal_client: MagicMock
+    ) -> None:
+        """Test that stream_task filters thinking events when include_thinking=False."""
+        from zap_ai.streaming.events import CompletedEvent, ThinkingEvent
+
+        mock_handle = AsyncMock()
+        mock_handle.query = AsyncMock(
+            side_effect=[
+                [
+                    {"seq": 1, "type": "thinking", "iteration": 1, "timestamp": "t1"},
+                    {"seq": 2, "type": "completed", "result": "Done!", "timestamp": "t2"},
+                ],
+            ]
+        )
+        mock_temporal_client.get_workflow_handle.return_value = mock_handle
+
+        await zap_with_mock_client.start()
+
+        events = []
+        async for event in zap_with_mock_client.stream_task(
+            agent_name="TestAgent",
+            task="Hello",
+            poll_interval=0.001,
+            include_thinking=False,
+        ):
+            events.append(event)
+
+        assert len(events) == 1
+        assert isinstance(events[0], CompletedEvent)
+        # Ensure no ThinkingEvent was yielded
+        assert not any(isinstance(e, ThinkingEvent) for e in events)
+
+    @pytest.mark.asyncio
+    async def test_stream_filters_tool_events(
+        self, zap_with_mock_client: Zap, mock_temporal_client: MagicMock
+    ) -> None:
+        """Test that stream_task filters tool events when include_tool_events=False."""
+        from zap_ai.streaming.events import (
+            CompletedEvent,
+            ThinkingEvent,
+            ToolCallEvent,
+            ToolResultEvent,
+        )
+
+        mock_handle = AsyncMock()
+        mock_handle.query = AsyncMock(
+            side_effect=[
+                [
+                    {"seq": 1, "type": "thinking", "iteration": 1, "timestamp": "t1"},
+                    {
+                        "seq": 2,
+                        "type": "tool_call",
+                        "name": "search",
+                        "arguments": {},
+                        "phrase": "Searching...",
+                        "tool_call_id": "tc1",
+                        "timestamp": "t2",
+                    },
+                    {
+                        "seq": 3,
+                        "type": "tool_result",
+                        "name": "search",
+                        "result": "results",
+                        "tool_call_id": "tc1",
+                        "success": True,
+                        "timestamp": "t3",
+                    },
+                    {"seq": 4, "type": "completed", "result": "Done!", "timestamp": "t4"},
+                ],
+            ]
+        )
+        mock_temporal_client.get_workflow_handle.return_value = mock_handle
+
+        await zap_with_mock_client.start()
+
+        events = []
+        async for event in zap_with_mock_client.stream_task(
+            agent_name="TestAgent",
+            task="Hello",
+            poll_interval=0.001,
+            include_tool_events=False,
+        ):
+            events.append(event)
+
+        assert len(events) == 2
+        assert isinstance(events[0], ThinkingEvent)
+        assert isinstance(events[1], CompletedEvent)
+        # Ensure no tool events were yielded
+        assert not any(isinstance(e, (ToolCallEvent, ToolResultEvent)) for e in events)
+
+    @pytest.mark.asyncio
+    async def test_stream_yields_error_event_on_failure(
+        self, zap_with_mock_client: Zap, mock_temporal_client: MagicMock
+    ) -> None:
+        """Test that stream_task yields ErrorEvent on workflow failure."""
+        from zap_ai.streaming.events import ErrorEvent
+
+        mock_handle = AsyncMock()
+        mock_handle.query = AsyncMock(
+            side_effect=[
+                [
+                    {"seq": 1, "type": "error", "error": "Something went wrong", "timestamp": "t1"},
+                ],
+            ]
+        )
+        mock_temporal_client.get_workflow_handle.return_value = mock_handle
+
+        await zap_with_mock_client.start()
+
+        events = []
+        async for event in zap_with_mock_client.stream_task(
+            agent_name="TestAgent", task="Hello", poll_interval=0.001
+        ):
+            events.append(event)
+
+        assert len(events) == 1
+        assert isinstance(events[0], ErrorEvent)
+        assert events[0].error == "Something went wrong"
+
+    @pytest.mark.asyncio
+    async def test_stream_handles_query_exception_completed(
+        self, zap_with_mock_client: Zap, mock_temporal_client: MagicMock
+    ) -> None:
+        """Test that stream_task handles completion when query raises exception."""
+        from zap_ai.streaming.events import CompletedEvent
+
+        mock_handle = AsyncMock()
+        # First get_events raises exception, then status query returns completed
+        mock_handle.query = AsyncMock(
+            side_effect=[
+                Exception("Query failed"),  # get_events fails
+                "completed",  # get_status succeeds
+                "Task result",  # get_result succeeds
+            ]
+        )
+        mock_temporal_client.get_workflow_handle.return_value = mock_handle
+
+        await zap_with_mock_client.start()
+
+        events = []
+        async for event in zap_with_mock_client.stream_task(
+            agent_name="TestAgent", task="Hello", poll_interval=0.001
+        ):
+            events.append(event)
+
+        assert len(events) == 1
+        assert isinstance(events[0], CompletedEvent)
+        assert events[0].result == "Task result"
+
+    @pytest.mark.asyncio
+    async def test_stream_handles_query_exception_failed(
+        self, zap_with_mock_client: Zap, mock_temporal_client: MagicMock
+    ) -> None:
+        """Test that stream_task handles failure when query raises exception."""
+        from zap_ai.streaming.events import ErrorEvent
+
+        mock_handle = AsyncMock()
+        # First get_events raises exception, then status query returns failed
+        mock_handle.query = AsyncMock(
+            side_effect=[
+                Exception("Query failed"),  # get_events fails
+                "failed",  # get_status succeeds
+                "Error message",  # get_error succeeds
+            ]
+        )
+        mock_temporal_client.get_workflow_handle.return_value = mock_handle
+
+        await zap_with_mock_client.start()
+
+        events = []
+        async for event in zap_with_mock_client.stream_task(
+            agent_name="TestAgent", task="Hello", poll_interval=0.001
+        ):
+            events.append(event)
+
+        assert len(events) == 1
+        assert isinstance(events[0], ErrorEvent)
+        assert events[0].error == "Error message"
+
+    @pytest.mark.asyncio
+    async def test_stream_continues_on_transient_query_exception(
+        self, zap_with_mock_client: Zap, mock_temporal_client: MagicMock
+    ) -> None:
+        """Test that stream_task continues polling after transient query exceptions."""
+        from zap_ai.streaming.events import CompletedEvent
+
+        mock_handle = AsyncMock()
+        # First: get_events fails, then status also fails (transient error)
+        # Second: get_events succeeds with completion
+        mock_handle.query = AsyncMock(
+            side_effect=[
+                Exception("Transient failure"),  # get_events fails
+                Exception("Status also fails"),  # get_status fails (transient)
+                [  # Second get_events succeeds
+                    {"seq": 1, "type": "completed", "result": "Done!", "timestamp": "t1"},
+                ],
+            ]
+        )
+        mock_temporal_client.get_workflow_handle.return_value = mock_handle
+
+        await zap_with_mock_client.start()
+
+        events = []
+        async for event in zap_with_mock_client.stream_task(
+            agent_name="TestAgent", task="Hello", poll_interval=0.001
+        ):
+            events.append(event)
+
+        assert len(events) == 1
+        assert isinstance(events[0], CompletedEvent)
+        assert events[0].result == "Done!"
+
+    @pytest.mark.asyncio
+    async def test_stream_task_id_in_events(
+        self, zap_with_mock_client: Zap, mock_temporal_client: MagicMock
+    ) -> None:
+        """Test that events contain the correct task_id."""
+        from zap_ai.streaming.events import CompletedEvent
+
+        mock_handle = AsyncMock()
+        mock_handle.query = AsyncMock(
+            side_effect=[
+                [{"seq": 1, "type": "completed", "result": "Done!", "timestamp": "t1"}],
+            ]
+        )
+        mock_temporal_client.get_workflow_handle.return_value = mock_handle
+
+        await zap_with_mock_client.start()
+
+        events = []
+        async for event in zap_with_mock_client.stream_task(
+            agent_name="TestAgent", task="Hello", poll_interval=0.001
+        ):
+            events.append(event)
+
+        assert len(events) == 1
+        assert isinstance(events[0], CompletedEvent)
+        assert events[0].task_id.startswith("TestAgent-")
