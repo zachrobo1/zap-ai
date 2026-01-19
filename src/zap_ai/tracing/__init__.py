@@ -21,6 +21,7 @@ Usage:
 
 from __future__ import annotations
 
+from contextvars import ContextVar
 from typing import TYPE_CHECKING
 
 from zap_ai.tracing.base import BaseTracingProvider
@@ -77,6 +78,44 @@ def reset_tracing_provider() -> None:
     _tracing_provider = None
 
 
+# Context variable for propagating trace context to nested operations (e.g., sampling)
+_current_trace_context: ContextVar[TraceContext | None] = ContextVar(
+    "current_trace_context", default=None
+)
+
+
+def set_current_trace_context(context: TraceContext) -> None:
+    """
+    Set the current trace context for implicit propagation.
+
+    Used to pass trace context to nested operations like MCP sampling
+    that occur during tool execution.
+
+    Args:
+        context: TraceContext to make available to nested operations.
+    """
+    _current_trace_context.set(context)
+
+
+def get_current_trace_context() -> TraceContext | None:
+    """
+    Get the current trace context if set.
+
+    Returns:
+        Current TraceContext or None if not in a traced context.
+    """
+    return _current_trace_context.get()
+
+
+def clear_current_trace_context() -> None:
+    """
+    Clear the current trace context.
+
+    Should be called after traced operations complete to avoid leaking context.
+    """
+    _current_trace_context.set(None)
+
+
 __all__ = [
     # Protocol and ABC
     "TracingProvider",
@@ -90,6 +129,10 @@ __all__ = [
     "set_tracing_provider",
     "get_tracing_provider",
     "reset_tracing_provider",
+    # Context propagation
+    "set_current_trace_context",
+    "get_current_trace_context",
+    "clear_current_trace_context",
 ]
 
 

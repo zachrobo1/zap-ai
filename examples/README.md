@@ -94,6 +94,17 @@ This example uses:
 - `CompletedEvent` - When the task finishes successfully
 - `ErrorEvent` - When the task fails
 
+### 6. MCP Sampling (`mcp_sampling/`)
+
+Demonstrates MCP sampling support where tools can request LLM completions:
+- Using `create_mcp_client()` with `sampling_handler="litellm"`
+- Tools that use `ctx.sample()` to request completions
+- LiteLLMSamplingHandler integration
+
+```bash
+python examples/mcp_sampling/main.py
+```
+
 ## Project Structure
 
 ```
@@ -109,9 +120,12 @@ examples/
 │   └── main.py               # Langfuse observability example
 ├── conversation_history/
 │   └── main.py               # Conversation history inspection example
-└── streaming/
-    ├── main.py               # Streaming events example
-    └── tools.py              # Text analysis tools
+├── streaming/
+│   ├── main.py               # Streaming events example
+│   └── tools.py              # Text analysis tools
+└── mcp_sampling/
+    ├── main.py               # MCP sampling example
+    └── tools.py              # MCP server with sampling tools
 ```
 
 The `langfuse_tracing` and `conversation_history` examples reuse tools from `simple_agent`.

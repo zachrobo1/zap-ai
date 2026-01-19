@@ -13,7 +13,12 @@ from typing import TYPE_CHECKING, Any
 from temporalio import activity
 
 from zap_ai.exceptions import ToolExecutionError, ToolNotFoundError
-from zap_ai.tracing import ObservationType, TraceContext, get_tracing_provider
+from zap_ai.mcp.sampling import get_sampling_handler_for_client
+from zap_ai.tracing import (
+    ObservationType,
+    TraceContext,
+    get_tracing_provider,
+)
 
 if TYPE_CHECKING:
     from zap_ai.mcp import ToolRegistry
@@ -145,6 +150,9 @@ async def tool_execution_activity(input: ToolExecutionInput) -> str:
             return result
         return json.dumps(result, default=str)
 
+    # Get sampling handler if this client has one (for trace context propagation)
+    sampling_handler = get_sampling_handler_for_client(client)
+
     try:
         # Wrap in tool span if we have trace context
         if parent_context:
@@ -157,8 +165,15 @@ async def tool_execution_activity(input: ToolExecutionInput) -> str:
                     "agent_name": input.agent_name,
                 },
                 input_data=input.arguments,
-            ):
-                return await _execute_tool()
+            ) as tool_ctx:
+                # Set context on handler for nested sampling operations
+                if sampling_handler:
+                    sampling_handler.set_trace_context(tool_ctx)
+                try:
+                    return await _execute_tool()
+                finally:
+                    if sampling_handler:
+                        sampling_handler.clear_trace_context()
         else:
             return await _execute_tool()
 

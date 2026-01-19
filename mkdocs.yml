@@ -37,6 +37,7 @@ nav:
       - Streaming Events: guides/streaming.md
       - Approval Workflows: guides/approval-workflows.md
       - Multimodal Vision: guides/multimodal-vision.md
+      - MCP Sampling: guides/mcp-sampling.md
       - Observability: guides/observability.md
   - API Reference:
       - Overview: api/index.md
