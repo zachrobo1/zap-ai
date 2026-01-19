@@ -21,6 +21,7 @@ LLM providers can't yet guarantee production-level SLAs. API calls fail, rate li
 - **Provider agnostic** - use any LLM supported by LiteLLM (OpenAI, Anthropic, etc.)
 - **Observability** - built-in tracing support with Langfuse integration
 - **Dynamic prompts** - context-aware prompts resolved at runtime
+- **Streaming events** - real-time event streaming via async generator API
 
 ## Built On
 
@@ -413,15 +414,41 @@ Zap supports tracing via a pluggable provider system. Langfuse is included out o
 - **Tool calls** - Tool observations with inputs/outputs
 - **Sub-agent delegations** - Nested agent spans
 
+## Streaming Events
+
+Stream events in real-time during task execution:
+
+```python
+from zap_ai.streaming import ThinkingEvent, ToolCallEvent, CompletedEvent
+
+async for event in zap.stream_task(agent_name="Assistant", task="What's the weather?"):
+    match event:
+        case ThinkingEvent(iteration=i):
+            print(f"Thinking (iteration {i})...")
+        case ToolCallEvent(phrase=phrase):
+            print(phrase)  # "Getting weather for London..."
+        case CompletedEvent(result=result):
+            print(f"Done: {result}")
+```
+
+**Event Types:**
+- `ThinkingEvent` - LLM started reasoning
+- `ToolCallEvent` - Tool being called (with human-readable `phrase`)
+- `ToolResultEvent` - Tool execution completed
+- `CompletedEvent` - Task finished successfully
+- `ErrorEvent` - Task failed
+
+See the [Streaming Guide](https://zachrobo1.github.io/zap-ai/guides/streaming/) for full details.
+
 ## Limitations
 
-- **No streaming** - Currently uses query-based polling for status. Real-time streaming may be added in future versions.
 - **Temporal required** - You need a running Temporal cluster (local dev server or Temporal Cloud).
 - **MCP tools only** - Tools must be exposed via MCP servers (FastMCP makes this easy).
+- **No token-level streaming** - Current streaming provides coarse-grained events (thinking, tool calls, completion). Token-by-token streaming may be added in a future version.
 
 ## Future Plans
 
-- Real-time streaming via callbacks/webhooks
+- Token-level streaming via Redis event bus
 - Hooks system for custom logic injection
 - Expose agents as MCP servers for agent-to-agent communication
 - Approval UI dashboard for managing approval queues

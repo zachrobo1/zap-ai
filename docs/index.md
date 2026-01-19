@@ -16,6 +16,7 @@ LLM providers can't yet guarantee production-level SLAs. API calls fail, rate li
 - **Provider agnostic** - use any LLM supported by LiteLLM (OpenAI, Anthropic, etc.)
 - **Observability** - built-in tracing support with Langfuse integration
 - **Dynamic prompts** - context-aware prompts resolved at runtime
+- **Streaming events** - real-time event streaming during task execution
 
 ## Built On
 
@@ -62,5 +63,6 @@ asyncio.run(main())
 
 - [Installation](getting-started/installation.md) - Get Zap installed
 - [Quick Start](getting-started/quickstart.md) - Build your first agent
+- [Streaming Events](guides/streaming.md) - Real-time event streaming
 - [Approval Workflows](guides/approval-workflows.md) - Human-in-the-loop oversight
 - [API Reference](api/index.md) - Detailed API documentation

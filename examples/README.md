@@ -74,6 +74,26 @@ Demonstrates the conversation history inspection API:
 python examples/conversation_history/main.py
 ```
 
+### 5. Streaming Events (`streaming/`)
+
+Demonstrates real-time event streaming with real MCP servers:
+- Connect to `mcp-server-fetch` for real web fetching
+- Local tools for text analysis
+- Pattern matching on all event types
+- Tool duration tracking via `tool_call_id`
+- Summary statistics
+
+```bash
+python examples/streaming/main.py
+```
+
+This example uses:
+- `ThinkingEvent` - When the LLM starts reasoning
+- `ToolCallEvent` - When a tool is about to be called
+- `ToolResultEvent` - When a tool completes
+- `CompletedEvent` - When the task finishes successfully
+- `ErrorEvent` - When the task fails
+
 ## Project Structure
 
 ```
@@ -87,8 +107,11 @@ examples/
 │   └── tools.py              # MCP tools server
 ├── langfuse_tracing/
 │   └── main.py               # Langfuse observability example
-└── conversation_history/
-    └── main.py               # Conversation history inspection example
+├── conversation_history/
+│   └── main.py               # Conversation history inspection example
+└── streaming/
+    ├── main.py               # Streaming events example
+    └── tools.py              # Text analysis tools
 ```
 
 The `langfuse_tracing` and `conversation_history` examples reuse tools from `simple_agent`.

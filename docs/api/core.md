@@ -13,6 +13,7 @@ The main orchestrator class that manages agents and Temporal connections.
         - start
         - stop
         - execute_task
+        - stream_task
         - get_task
         - get_agent
         - get_agent_tools

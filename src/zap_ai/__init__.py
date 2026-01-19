@@ -55,6 +55,16 @@ from zap_ai.llm.message_types import (
     MessageContent,
     TextContent,
 )
+from zap_ai.streaming import (
+    CompletedEvent,
+    ErrorEvent,
+    Event,
+    StreamEvent,
+    ThinkingEvent,
+    TokenEvent,
+    ToolCallEvent,
+    ToolResultEvent,
+)
 from zap_ai.workflows.models import ApprovalRequest, ApprovalRules
 
 __version__ = version("zap-ai")
@@ -75,6 +85,15 @@ __all__ = [
     "ImageContent",
     "ContentPart",
     "MessageContent",
+    # Streaming event types
+    "StreamEvent",
+    "ThinkingEvent",
+    "TokenEvent",
+    "ToolCallEvent",
+    "ToolResultEvent",
+    "CompletedEvent",
+    "ErrorEvent",
+    "Event",
     # Exceptions
     "ZapConfigurationError",
     "ZapNotStartedError",

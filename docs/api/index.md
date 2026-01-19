@@ -18,6 +18,14 @@ from zap_ai import (
     ToolCallInfo,
     ConversationTurn,
 
+    # Streaming events
+    ThinkingEvent,
+    ToolCallEvent,
+    ToolResultEvent,
+    TokenEvent,
+    CompletedEvent,
+    ErrorEvent,
+
     # Type helpers
     TContext,
     DefaultContext,
@@ -37,6 +45,7 @@ from zap_ai import (
 |--------|-------------|
 | [Core](core.md) | Main classes: `Zap`, `ZapAgent`, `Task`, `TaskStatus` |
 | [Conversation](conversation.md) | History parsing: `ConversationTurn`, `ToolCallInfo` |
+| [Streaming](streaming.md) | Event types: `ThinkingEvent`, `ToolCallEvent`, etc. |
 | [Tracing](tracing.md) | Observability: tracing providers and protocols |
 | [Worker](worker.md) | Temporal worker utilities |
 | [Exceptions](exceptions.md) | Error types |
