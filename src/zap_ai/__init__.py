@@ -49,13 +49,13 @@ from zap_ai.exceptions import (
     ZapConfigurationError,
     ZapNotStartedError,
 )
-from zap_ai.workflows.models import ApprovalRequest, ApprovalRules
 from zap_ai.llm.message_types import (
     ContentPart,
     ImageContent,
     MessageContent,
     TextContent,
 )
+from zap_ai.workflows.models import ApprovalRequest, ApprovalRules
 
 __version__ = version("zap-ai")
 
