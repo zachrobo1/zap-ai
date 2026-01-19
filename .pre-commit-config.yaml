@@ -5,3 +5,12 @@ repos:
       - id: ruff
         args: [--fix]
       - id: ruff-format
+
+  - repo: local
+    hooks:
+      - id: docs-analysis
+        name: Documentation Analysis
+        entry: uv run python scripts/analyze_docs.py
+        language: system
+        stages: [pre-push]
+        pass_filenames: false
