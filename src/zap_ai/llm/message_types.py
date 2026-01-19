@@ -96,9 +96,7 @@ class ImageContent:
         )
 
     @classmethod
-    def from_url(
-        cls, url: str, detail: ImageDetailLevel | None = None
-    ) -> ImageContent:
+    def from_url(cls, url: str, detail: ImageDetailLevel | None = None) -> ImageContent:
         """
         Create from an image URL.
 

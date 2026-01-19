@@ -51,9 +51,7 @@ def _message_contains_images(message: str | list[dict[str, Any]]) -> bool:
     """
     if isinstance(message, str):
         return False
-    return any(
-        isinstance(part, dict) and part.get("type") == "image_url" for part in message
-    )
+    return any(isinstance(part, dict) and part.get("type") == "image_url" for part in message)
 
 
 @workflow.defn
