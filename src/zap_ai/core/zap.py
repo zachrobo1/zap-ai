@@ -19,7 +19,12 @@ from zap_ai.core.validation import (
 from zap_ai.exceptions import (
     AgentNotFoundError,
     TaskNotFoundError,
+    VisionNotSupportedError,
     ZapNotStartedError,
+)
+from zap_ai.llm.message_types import (
+    MessageContent,
+    content_has_images,
 )
 from zap_ai.tracing import NoOpTracingProvider, TracingProvider
 
@@ -236,10 +241,33 @@ class Zap(Generic[TContext]):
         if not self._started:
             raise ZapNotStartedError("Zap has not been started. Call 'await zap.start()' first.")
 
+    @property
+    def tool_registry(self) -> "ToolRegistry | None":
+        """
+        Get the tool registry for worker setup.
+
+        Returns the internal ToolRegistry instance for use with `create_worker`.
+        Returns None if Zap hasn't been started.
+
+        Example:
+            ```python
+            zap = Zap(agents=[...])
+            await zap.start()
+
+            worker = await create_worker(
+                temporal_client,
+                task_queue=zap.task_queue,
+                tool_registry=zap.tool_registry,
+            )
+            ```
+        """
+        return self._tool_registry
+
     async def execute_task(
         self,
         agent_name: str | None = None,
         task: str | None = None,
+        task_content: MessageContent | None = None,
         follow_up_on_task: str | None = None,
         context: TContext | None = None,
         approval_rules: "ApprovalRules | None" = None,
@@ -253,7 +281,10 @@ class Zap(Generic[TContext]):
         Args:
             agent_name: Name of the agent to execute the task. Required for
                 new tasks, ignored for follow-ups (uses original agent).
-            task: The task description/prompt to send to the agent. Required.
+            task: The task description/prompt to send to the agent (text only).
+                Either task or task_content is required.
+            task_content: Multimodal task content (text + images). If provided,
+                takes precedence over `task`. Use this for vision tasks.
             follow_up_on_task: If provided, sends the task as a follow-up
                 message to an existing task instead of starting a new one.
             context: Optional context to pass to agents with dynamic prompts.
@@ -270,6 +301,8 @@ class Zap(Generic[TContext]):
             ZapNotStartedError: If start() hasn't been called.
             AgentNotFoundError: If agent_name doesn't exist (new tasks only).
             TaskNotFoundError: If follow_up_on_task doesn't exist.
+            VisionNotSupportedError: If task contains images but model doesn't
+                support vision.
             ValueError: If required arguments are missing.
 
         Example (new task):
@@ -277,6 +310,19 @@ class Zap(Generic[TContext]):
             task = await zap.execute_task(
                 agent_name="MyAgent",
                 task="Analyze this data and summarize findings",
+            )
+            ```
+
+        Example (with images - multimodal):
+            ```python
+            from zap_ai import TextContent, ImageContent
+
+            task = await zap.execute_task(
+                agent_name="VisionAgent",
+                task_content=[
+                    TextContent(text="What's in this image?"),
+                    ImageContent.from_url("https://example.com/photo.jpg"),
+                ],
             )
             ```
 
@@ -313,11 +359,17 @@ class Zap(Generic[TContext]):
         """
         self._ensure_started()
 
-        if task is None:
-            raise ValueError("task argument is required")
+        # Determine effective content
+        effective_content: MessageContent
+        if task_content is not None:
+            effective_content = task_content
+        elif task is not None:
+            effective_content = task
+        else:
+            raise ValueError("Either 'task' or 'task_content' argument is required")
 
         if follow_up_on_task is not None:
-            return await self._follow_up_task(follow_up_on_task, task)
+            return await self._follow_up_task(follow_up_on_task, effective_content)
 
         # New task
         if agent_name is None:
@@ -325,6 +377,16 @@ class Zap(Generic[TContext]):
 
         # Validate agent exists and get agent config
         agent = self.get_agent(agent_name)
+
+        # Validate vision support if content contains images
+        if content_has_images(effective_content):
+            from zap_ai.llm.provider import supports_vision
+
+            if not supports_vision(agent.model):
+                raise VisionNotSupportedError(
+                    f"Model '{agent.model}' does not support vision. "
+                    f"Cannot process task with images."
+                )
 
         # Use default empty dict if no context provided
         effective_context: TContext = context if context is not None else {}  # type: ignore[assignment]
@@ -362,6 +424,9 @@ class Zap(Generic[TContext]):
                     stacklevel=2,
                 )
 
+        # Format content for workflow (convert ContentPart objects to dicts)
+        initial_task = _format_content_for_workflow(effective_content)
+
         # Start Temporal workflow
         from zap_ai.workflows.agent_workflow import AgentWorkflow
         from zap_ai.workflows.models import AgentWorkflowInput
@@ -370,7 +435,7 @@ class Zap(Generic[TContext]):
             AgentWorkflow.run,
             AgentWorkflowInput(
                 agent_name=agent_name,
-                initial_task=task,
+                initial_task=initial_task,
                 system_prompt=resolved_prompt,
                 model=agent.model,
                 tools=tools,
@@ -389,27 +454,49 @@ class Zap(Generic[TContext]):
             status=TaskStatus.PENDING,
         )
 
-    async def _follow_up_task(self, task_id: str, message: str) -> Task:
+    async def _follow_up_task(self, task_id: str, message: MessageContent) -> Task:
         """
         Send a follow-up message to an existing task.
 
         Args:
             task_id: The task ID to send the message to.
-            message: The follow-up message.
+            message: The follow-up message (text or multimodal).
 
         Returns:
             Updated Task object.
 
         Raises:
             TaskNotFoundError: If the task doesn't exist.
+            VisionNotSupportedError: If message contains images but the
+                task's agent model doesn't support vision.
         """
         from zap_ai.workflows.agent_workflow import AgentWorkflow
+
+        # Validate vision support if message contains images
+        # Extract agent name from task_id (format: "{agent_name}-{uuid}")
+        if content_has_images(message):
+            from zap_ai.llm.provider import supports_vision
+
+            agent_name = task_id.split("-")[0]
+            try:
+                agent = self.get_agent(agent_name)
+                if not supports_vision(agent.model):
+                    raise VisionNotSupportedError(
+                        f"Model '{agent.model}' does not support vision. "
+                        f"Cannot send follow-up message with images."
+                    )
+            except AgentNotFoundError:
+                # Agent name extraction failed - let the workflow handle it
+                pass
 
         try:
             handle = self.temporal_client.get_workflow_handle(task_id)  # type: ignore[union-attr]
 
+            # Format content for workflow
+            formatted_message = _format_content_for_workflow(message)
+
             # Send signal
-            await handle.signal(AgentWorkflow.add_message, message)
+            await handle.signal(AgentWorkflow.add_message, formatted_message)
 
             # Query current state
             status_str = await handle.query(AgentWorkflow.get_status)
@@ -583,3 +670,20 @@ class Zap(Generic[TContext]):
         # The caller is responsible for client lifecycle.
 
         self._started = False
+
+
+def _format_content_for_workflow(content: MessageContent) -> str | list[dict[str, Any]]:
+    """
+    Format MessageContent for workflow input.
+
+    Converts ContentPart objects to LiteLLM format dicts.
+
+    Args:
+        content: Message content (string or list of ContentPart).
+
+    Returns:
+        String for text-only, or list of dicts for multimodal.
+    """
+    if isinstance(content, str):
+        return content
+    return [part.to_litellm() for part in content]

@@ -1,6 +1,146 @@
 """Tests for LLM message types."""
 
-from zap_ai.llm.message_types import InferenceResult, Message, ToolCall
+from zap_ai.llm.message_types import (
+    ImageContent,
+    InferenceResult,
+    Message,
+    TextContent,
+    ToolCall,
+    content_has_images,
+)
+
+
+class TestTextContent:
+    """Tests for TextContent dataclass."""
+
+    def test_to_litellm(self) -> None:
+        """Test conversion to LiteLLM format."""
+        content = TextContent(text="Hello world")
+        result = content.to_litellm()
+
+        assert result == {"type": "text", "text": "Hello world"}
+
+    def test_from_litellm(self) -> None:
+        """Test parsing from LiteLLM format."""
+        data = {"type": "text", "text": "Test message"}
+        content = TextContent.from_litellm(data)
+
+        assert content.text == "Test message"
+        assert content.type == "text"
+
+    def test_type_is_always_text(self) -> None:
+        """Test that type field is always 'text'."""
+        content = TextContent(text="anything")
+        assert content.type == "text"
+
+
+class TestImageContent:
+    """Tests for ImageContent dataclass."""
+
+    def test_from_url(self) -> None:
+        """Test creating image from URL."""
+        img = ImageContent.from_url("https://example.com/image.png")
+
+        assert img.url == "https://example.com/image.png"
+        assert img.type == "image_url"
+        assert img.detail is None
+        assert img.format is None
+
+    def test_from_url_with_detail(self) -> None:
+        """Test creating image from URL with detail level."""
+        img = ImageContent.from_url("https://example.com/img.jpg", detail="high")
+
+        assert img.url == "https://example.com/img.jpg"
+        assert img.detail == "high"
+
+    def test_from_base64(self) -> None:
+        """Test creating image from base64 data."""
+        img = ImageContent.from_base64("abc123xyz", mime_type="image/jpeg")
+
+        assert img.url == "data:image/jpeg;base64,abc123xyz"
+        assert img.format == "image/jpeg"
+
+    def test_from_base64_default_png(self) -> None:
+        """Test that from_base64 defaults to PNG mime type."""
+        img = ImageContent.from_base64("data")
+
+        assert "image/png" in img.url
+        assert img.format == "image/png"
+
+    def test_to_litellm_basic(self) -> None:
+        """Test basic conversion to LiteLLM format."""
+        img = ImageContent(url="https://example.com/img.png")
+        result = img.to_litellm()
+
+        assert result == {
+            "type": "image_url",
+            "image_url": {"url": "https://example.com/img.png"},
+        }
+
+    def test_to_litellm_with_detail(self) -> None:
+        """Test conversion with detail level."""
+        img = ImageContent(url="https://example.com/img.png", detail="low")
+        result = img.to_litellm()
+
+        assert result["image_url"]["detail"] == "low"
+
+    def test_to_litellm_with_format(self) -> None:
+        """Test conversion with explicit format."""
+        img = ImageContent(url="gs://bucket/img", format="image/webp")
+        result = img.to_litellm()
+
+        assert result["image_url"]["format"] == "image/webp"
+
+    def test_from_litellm(self) -> None:
+        """Test parsing from LiteLLM format."""
+        data = {
+            "type": "image_url",
+            "image_url": {
+                "url": "https://example.com/photo.jpg",
+                "detail": "auto",
+            },
+        }
+        img = ImageContent.from_litellm(data)
+
+        assert img.url == "https://example.com/photo.jpg"
+        assert img.detail == "auto"
+
+    def test_from_litellm_string_url(self) -> None:
+        """Test parsing when image_url is just a string."""
+        data = {"type": "image_url", "image_url": "https://example.com/img.png"}
+        img = ImageContent.from_litellm(data)
+
+        assert img.url == "https://example.com/img.png"
+
+
+class TestContentHasImages:
+    """Tests for content_has_images function."""
+
+    def test_string_content_has_no_images(self) -> None:
+        """Test that string content returns False."""
+        assert content_has_images("Hello world") is False
+
+    def test_none_content_has_no_images(self) -> None:
+        """Test that None content returns False."""
+        assert content_has_images(None) is False
+
+    def test_text_only_list_has_no_images(self) -> None:
+        """Test list with only text content returns False."""
+        content = [TextContent(text="Hello"), TextContent(text="World")]
+        assert content_has_images(content) is False
+
+    def test_list_with_image_returns_true(self) -> None:
+        """Test list with image content returns True."""
+        content = [
+            TextContent(text="Describe this:"),
+            ImageContent.from_url("https://example.com/img.png"),
+        ]
+        assert content_has_images(content) is True
+
+    def test_image_only_list_returns_true(self) -> None:
+        """Test list with only images returns True."""
+        content = [ImageContent.from_url("https://example.com/img.png")]
+        assert content_has_images(content) is True
 
 
 class TestToolCall:
@@ -86,6 +226,29 @@ class TestMessage:
         assert msg.role == "user"
         assert msg.content == "Hello"
 
+    def test_user_factory_multimodal(self) -> None:
+        """Test creating user message with multimodal content."""
+        content = [
+            TextContent(text="Describe this:"),
+            ImageContent.from_url("https://example.com/img.png"),
+        ]
+        msg = Message.user(content)
+
+        assert msg.role == "user"
+        assert isinstance(msg.content, list)
+        assert len(msg.content) == 2
+
+    def test_user_with_images(self) -> None:
+        """Test creating user message with images helper."""
+        img = ImageContent.from_url("https://example.com/img.png")
+        msg = Message.user_with_images("What's in this image?", [img])
+
+        assert msg.role == "user"
+        assert isinstance(msg.content, list)
+        assert len(msg.content) == 2
+        assert isinstance(msg.content[0], TextContent)
+        assert isinstance(msg.content[1], ImageContent)
+
     def test_assistant_factory_with_content(self) -> None:
         """Test creating assistant message with content."""
         msg = Message.assistant(content="Hi there")
@@ -120,6 +283,21 @@ class TestMessage:
 
         assert result == {"role": "user", "content": "Test"}
 
+    def test_to_litellm_multimodal_message(self) -> None:
+        """Test converting multimodal message to LiteLLM format."""
+        content = [
+            TextContent(text="What's in this image?"),
+            ImageContent.from_url("https://example.com/img.png"),
+        ]
+        msg = Message.user(content)
+        result = msg.to_litellm()
+
+        assert result["role"] == "user"
+        assert isinstance(result["content"], list)
+        assert len(result["content"]) == 2
+        assert result["content"][0] == {"type": "text", "text": "What's in this image?"}
+        assert result["content"][1]["type"] == "image_url"
+
     def test_to_litellm_assistant_with_tool_calls(self) -> None:
         """Test converting assistant message with tool calls."""
         tc = ToolCall(
@@ -151,6 +329,23 @@ class TestMessage:
         assert msg.role == "user"
         assert msg.content == "Hello"
 
+    def test_from_litellm_parses_multimodal(self) -> None:
+        """Test parsing multimodal message from LiteLLM format."""
+        raw = {
+            "role": "user",
+            "content": [
+                {"type": "text", "text": "Describe this:"},
+                {"type": "image_url", "image_url": {"url": "https://example.com/img.png"}},
+            ],
+        }
+        msg = Message.from_litellm(raw)
+
+        assert msg.role == "user"
+        assert isinstance(msg.content, list)
+        assert len(msg.content) == 2
+        assert isinstance(msg.content[0], TextContent)
+        assert isinstance(msg.content[1], ImageContent)
+
     def test_from_litellm_parses_tool_calls(self) -> None:
         """Test parsing message with tool calls."""
         raw = {
@@ -171,6 +366,46 @@ class TestMessage:
 
         assert msg.role == ""
         assert msg.content is None
+
+    def test_has_images_text_content(self) -> None:
+        """Test has_images returns False for text-only content."""
+        msg = Message.user("Hello")
+        assert msg.has_images() is False
+
+    def test_has_images_multimodal_with_image(self) -> None:
+        """Test has_images returns True when images present."""
+        content = [
+            TextContent(text="Describe:"),
+            ImageContent.from_url("https://example.com/img.png"),
+        ]
+        msg = Message.user(content)
+        assert msg.has_images() is True
+
+    def test_has_images_multimodal_text_only(self) -> None:
+        """Test has_images returns False for list with only text."""
+        content = [TextContent(text="Hello"), TextContent(text="World")]
+        msg = Message.user(content)
+        assert msg.has_images() is False
+
+    def test_get_text_content_string(self) -> None:
+        """Test get_text_content returns string content as-is."""
+        msg = Message.user("Hello world")
+        assert msg.get_text_content() == "Hello world"
+
+    def test_get_text_content_none(self) -> None:
+        """Test get_text_content returns None for None content."""
+        msg = Message.assistant()
+        assert msg.get_text_content() is None
+
+    def test_get_text_content_multimodal(self) -> None:
+        """Test get_text_content extracts text from multimodal content."""
+        content = [
+            TextContent(text="First part"),
+            ImageContent.from_url("https://example.com/img.png"),
+            TextContent(text="Second part"),
+        ]
+        msg = Message.user(content)
+        assert msg.get_text_content() == "First part Second part"
 
 
 class TestInferenceResult:
@@ -244,19 +479,25 @@ class TestLLMModuleImports:
     """Tests for LLM module imports."""
 
     def test_imports_from_module(self) -> None:
-        """Test that all exports are importable from module."""
+        """Test that message types are importable from llm module."""
         from zap_ai.llm import (
             InferenceResult,
-            LLMProviderError,
             Message,
             ToolCall,
-            complete,
-            convert_messages_to_litellm,
         )
 
         assert Message is not None
         assert ToolCall is not None
         assert InferenceResult is not None
+
+    def test_provider_imports_from_provider_module(self) -> None:
+        """Test that provider exports are importable from provider module."""
+        from zap_ai.llm.provider import (
+            LLMProviderError,
+            complete,
+            convert_messages_to_litellm,
+        )
+
         assert complete is not None
         assert convert_messages_to_litellm is not None
         assert LLMProviderError is not None
@@ -269,5 +510,6 @@ class TestLLMModuleImports:
         assert "Message" in llm.__all__
         assert "ToolCall" in llm.__all__
         assert "InferenceResult" in llm.__all__
-        assert "complete" in llm.__all__
-        assert "LLMProviderError" in llm.__all__
+        # Provider exports are NOT in llm.__all__ (import from llm.provider instead)
+        assert "complete" not in llm.__all__
+        assert "LLMProviderError" not in llm.__all__

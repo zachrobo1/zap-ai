@@ -260,7 +260,7 @@ class TestZapExecuteTask:
         await zap_with_mock_client.start()
         with pytest.raises(ValueError) as exc_info:
             await zap_with_mock_client.execute_task(agent_name="TestAgent")
-        assert "task argument is required" in str(exc_info.value)
+        assert "'task' or 'task_content' argument is required" in str(exc_info.value)
 
     @pytest.mark.asyncio
     async def test_execute_new_task_without_agent_raises(self, zap_with_mock_client: Zap) -> None:
