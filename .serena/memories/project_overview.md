@@ -13,6 +13,7 @@ Zap is an opinionated library for building **resilient AI agents** on top of Tem
 - **MCP integration** - easily add tools via the Model Context Protocol
 - **Provider agnostic** - use any LLM supported by LiteLLM (OpenAI, Anthropic, etc.)
 - **Observability** - built-in tracing support with Langfuse integration (extensible via BaseTracingProvider ABC)
+- **MCP sampling support** - Handle LLM requests from MCP servers via `LiteLLMSamplingHandler` (import from `zap_ai.mcp.sampling`)
 - **Dynamic prompts** - context-aware prompts resolved at runtime
 - **Conversation history API** - rich access to turns, tool calls, and text content
 - **Multimodal/Vision support** - send images to vision-capable models with automatic capability validation
@@ -67,6 +68,7 @@ src/zap_ai/
 ├── mcp/                # MCP client management and tool registry
 │   ├── __init__.py
 │   ├── client_manager.py # FastMCP client lifecycle
+│   ├── sampling.py       # MCP sampling handlers - import directly: `from zap_ai.mcp.sampling import create_mcp_client, LiteLLMSamplingHandler`
 │   ├── schema_converter.py # MCP to LiteLLM schema conversion
 │   └── tool_registry.py # Tool discovery and caching (get_tools_for_agent)
 ├── streaming/          # Streaming event support

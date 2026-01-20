@@ -33,10 +33,12 @@ if TYPE_CHECKING:
 # beartype causes circular import issues in the sandbox
 # httpx uses urllib.request.Request which is restricted in the sandbox
 # litellm uses thread-local objects which conflict with sandbox restrictions
+# beartype causes circular import issues in the sandbox
 _SANDBOX_RESTRICTIONS = SandboxRestrictions.default.with_passthrough_modules(
     "beartype",
     "httpx",
     "litellm",
+    "urllib",
 )
 
 
