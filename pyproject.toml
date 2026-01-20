@@ -4,7 +4,7 @@ version = "0.3.1"
 description = "Zach's Agent Platform is a library built on top of Temporal, FastMCP, and LiteLLM to build resilient agents."
 readme = "README.md"
 license = { text = "MIT" }
-requires-python = ">=3.11"
+requires-python = ">=3.11,<4.0"
 authors = [
     { name = "Zach Cloud", email = "me@zachb.cloud" },
 ]
@@ -17,17 +17,18 @@ classifiers = [
     "Operating System :: OS Independent",
 ]
 dependencies = [
-    "fastmcp>=2.14.1",
+    "fastmcp==2.14.3",
     "temporalio>=1.10.0",
-    "litellm>=1.50.0",
+    "litellm==1.81.0",
     "pydantic>=2.0.0",
     "python-dotenv>=1.2.1",
     "typing_extensions>=4.4.0",
+    "mkdocstrings==1.0.1",
 ]
 
 [project.optional-dependencies]
 langfuse = [
-    "langfuse>=2.0.0"
+    "langfuse>=3.0.0"
 ]
 
 [dependency-groups]
@@ -36,8 +37,8 @@ dev = [
     "pytest-asyncio>=0.24.0",
     "pytest-mock>=3.14.0",
     "pytest-cov>=6.0.0",
-    "ruff>=0.8.0",
-    "pre-commit>=4.0.0",
+    "ruff>=0.14.13",
+    "pre-commit>=4.2.0",
 ]
 docs = [
     "mkdocs>=1.6.0",

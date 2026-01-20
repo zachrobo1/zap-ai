@@ -8,7 +8,8 @@ This project uses **uv** as the package manager. All commands should be run from
 curl -LsSf https://astral.sh/uv/install.sh | sh
 
 # Create virtual environment and install dependencies
-uv sync --dev
+# Use --no-install-project to skip installing the project itself
+uv sync --all-groups --no-install-project
 
 # Install pre-commit hooks
 uv run pre-commit install
