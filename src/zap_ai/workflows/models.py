@@ -165,6 +165,7 @@ class AgentWorkflowInput:
         parent_trace_context: Parent trace context for sub-agent linking.
         approval_rules: Optional rules for human-in-the-loop approval.
         tool_descriptions: Mapping of tool names to descriptions for streaming phrases.
+        context: Optional serialized TContext to pass to MCP tools.
     """
 
     agent_name: str
@@ -180,6 +181,7 @@ class AgentWorkflowInput:
     parent_trace_context: dict[str, Any] | None = None
     approval_rules: dict[str, Any] | None = None  # Serialized ApprovalRules
     tool_descriptions: dict[str, str] = field(default_factory=dict)
+    context: dict[str, Any] | None = None
 
 
 @dataclass

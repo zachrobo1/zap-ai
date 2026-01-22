@@ -32,7 +32,7 @@ nav:
       - Installation: getting-started/installation.md
       - Quick Start: getting-started/quickstart.md
   - Guides:
-      - Dynamic Prompts: guides/dynamic-prompts.md
+      - Dynamic Prompts & Context: guides/dynamic-prompts.md
       - Multi-Agent Systems: guides/multi-agent.md
       - Streaming Events: guides/streaming.md
       - Approval Workflows: guides/approval-workflows.md

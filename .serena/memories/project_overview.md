@@ -15,6 +15,7 @@ Zap is an opinionated library for building **resilient AI agents** on top of Tem
 - **Observability** - built-in tracing support with Langfuse integration (extensible via BaseTracingProvider ABC)
 - **MCP sampling support** - Handle LLM requests from MCP servers via `LiteLLMSamplingHandler` (import from `zap_ai.mcp.sampling`)
 - **Dynamic prompts** - context-aware prompts resolved at runtime
+- **Context injection to MCP tools** - pass context (user_id, tenant, etc.) to tools via FastMCP's meta parameter without LLM visibility
 - **Conversation history API** - rich access to turns, tool calls, and text content
 - **Multimodal/Vision support** - send images to vision-capable models with automatic capability validation
 - **Streaming support** - async generator API for real-time event streaming during task execution
@@ -68,6 +69,7 @@ src/zap_ai/
 ├── mcp/                # MCP client management and tool registry
 │   ├── __init__.py
 │   ├── client_manager.py # FastMCP client lifecycle
+│   ├── context.py        # ZapContext injection helpers for MCP tools (import: `from zap_ai.mcp.context import get_zap_context`)
 │   ├── sampling.py       # MCP sampling handlers - import directly: `from zap_ai.mcp.sampling import create_mcp_client, LiteLLMSamplingHandler`
 │   ├── schema_converter.py # MCP to LiteLLM schema conversion
 │   └── tool_registry.py # Tool discovery and caching (get_tools_for_agent)
@@ -150,10 +152,30 @@ All exceptions inherit from `ZapError`:
 8. `continue-as-new` prevents event history from growing unbounded
 9. `stream_task()` polls workflow via Temporal query to yield events in real-time
 
+## Context Injection
+
+Context passed to `execute_task()` serves two purposes:
+1. **Dynamic prompts** - Resolve `prompt=lambda ctx: f"..."` at runtime
+2. **MCP tool injection** - Pass context to tools via FastMCP's `meta` parameter
+
+**Accessing context in MCP tools:**
+```python
+from fastmcp import Context
+from fastmcp.server.dependencies import CurrentContext
+from zap_ai.mcp.context import get_zap_context, get_zap_context_value
+
+@mcp.tool()
+async def my_tool(query: str, ctx: Context = CurrentContext()) -> str:
+    zap_ctx = get_zap_context(ctx)  # Returns dict with context
+    user_id = get_zap_context_value(ctx, "user_id", "default")  # Specific value
+```
+
+The context is hidden from the LLM schema - it only sees the `query` parameter.
+
 ## Zap Methods
 - `start()` - Connect to Temporal, initialize MCP clients
 - `stop()` - Graceful shutdown
-- `execute_task()` - Start a task and return Task object
+- `execute_task(agent_name, task, context=None)` - Start a task; context is used for dynamic prompts AND injected to MCP tools
 - `stream_task()` - Execute task and stream events via async generator
 - `get_task()` - Retrieve task by ID
 - `get_agent()` - Get agent configuration

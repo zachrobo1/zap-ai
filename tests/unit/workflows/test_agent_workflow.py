@@ -4,6 +4,10 @@ import pytest
 from temporalio import activity
 from temporalio.testing import WorkflowEnvironment
 from temporalio.worker import Worker
+from temporalio.worker.workflow_sandbox import (
+    SandboxedWorkflowRunner,
+    SandboxRestrictions,
+)
 
 from zap_ai.activities import (
     InferenceInput,
@@ -12,6 +16,16 @@ from zap_ai.activities import (
 )
 from zap_ai.activities.tool_execution import AgentConfigOutput
 from zap_ai.workflows import AgentWorkflow, AgentWorkflowInput
+
+
+def _create_sandbox_runner() -> SandboxedWorkflowRunner:
+    """Create a sandbox runner with passthrough modules for beartype/fastmcp."""
+    return SandboxedWorkflowRunner(
+        restrictions=SandboxRestrictions.default.with_passthrough_modules(
+            "beartype",
+            "fastmcp",
+        )
+    )
 
 
 # Mock activities for testing
@@ -77,6 +91,7 @@ class TestAgentWorkflowBasic:
                 mock_tool_execution_activity,
                 mock_get_agent_config_activity,
             ],
+            workflow_runner=_create_sandbox_runner(),
         ):
             result = await workflow_env.client.execute_workflow(
                 AgentWorkflow.run,
@@ -106,6 +121,7 @@ class TestAgentWorkflowBasic:
                 mock_tool_execution_activity,
                 mock_get_agent_config_activity,
             ],
+            workflow_runner=_create_sandbox_runner(),
         ):
             result = await workflow_env.client.execute_workflow(
                 AgentWorkflow.run,
@@ -136,6 +152,7 @@ class TestAgentWorkflowQueries:
                 mock_tool_execution_activity,
                 mock_get_agent_config_activity,
             ],
+            workflow_runner=_create_sandbox_runner(),
         ):
             # Start workflow
             handle = await workflow_env.client.start_workflow(
@@ -166,6 +183,7 @@ class TestAgentWorkflowQueries:
                 mock_tool_execution_activity,
                 mock_get_agent_config_activity,
             ],
+            workflow_runner=_create_sandbox_runner(),
         ):
             handle = await workflow_env.client.start_workflow(
                 AgentWorkflow.run,
@@ -194,6 +212,7 @@ class TestAgentWorkflowQueries:
                 mock_tool_execution_activity,
                 mock_get_agent_config_activity,
             ],
+            workflow_runner=_create_sandbox_runner(),
         ):
             handle = await workflow_env.client.start_workflow(
                 AgentWorkflow.run,
@@ -225,6 +244,7 @@ class TestAgentWorkflowQueries:
                 mock_tool_execution_activity,
                 mock_get_agent_config_activity,
             ],
+            workflow_runner=_create_sandbox_runner(),
         ):
             handle = await workflow_env.client.start_workflow(
                 AgentWorkflow.run,
@@ -254,6 +274,7 @@ class TestAgentWorkflowQueries:
                 mock_tool_execution_activity,
                 mock_get_agent_config_activity,
             ],
+            workflow_runner=_create_sandbox_runner(),
         ):
             handle = await workflow_env.client.start_workflow(
                 AgentWorkflow.run,
@@ -281,6 +302,7 @@ class TestAgentWorkflowQueries:
                 mock_tool_execution_activity,
                 mock_get_agent_config_activity,
             ],
+            workflow_runner=_create_sandbox_runner(),
         ):
             handle = await workflow_env.client.start_workflow(
                 AgentWorkflow.run,
@@ -327,6 +349,7 @@ class TestAgentWorkflowContinueAsNew:
                 mock_tool_execution_activity,
                 mock_get_agent_config_activity,
             ],
+            workflow_runner=_create_sandbox_runner(),
         ):
             handle = await workflow_env.client.start_workflow(
                 AgentWorkflow.run,
@@ -366,6 +389,7 @@ class TestAgentWorkflowSignals:
                 mock_tool_execution_activity,
                 mock_get_agent_config_activity,
             ],
+            workflow_runner=_create_sandbox_runner(),
         ):
             handle = await workflow_env.client.start_workflow(
                 AgentWorkflow.run,
@@ -405,6 +429,7 @@ class TestAgentWorkflowWithParent:
                 mock_tool_execution_activity,
                 mock_get_agent_config_activity,
             ],
+            workflow_runner=_create_sandbox_runner(),
         ):
             handle = await workflow_env.client.start_workflow(
                 AgentWorkflow.run,
@@ -543,6 +568,7 @@ class TestAgentWorkflowParallelToolCalls:
                 tracking_tool_activity,
                 config_activity,
             ],
+            workflow_runner=_create_sandbox_runner(),
         ):
             start_time = time.time()
             await workflow_env.client.execute_workflow(
@@ -622,6 +648,7 @@ class TestAgentWorkflowParallelToolCalls:
                 tool_with_name_result,
                 config_activity,
             ],
+            workflow_runner=_create_sandbox_runner(),
         ):
             handle = await workflow_env.client.start_workflow(
                 AgentWorkflow.run,
@@ -698,6 +725,7 @@ class TestAgentWorkflowParallelToolCalls:
                 mixed_tool_activity,
                 config_activity,
             ],
+            workflow_runner=_create_sandbox_runner(),
         ):
             handle = await workflow_env.client.start_workflow(
                 AgentWorkflow.run,
@@ -738,6 +766,7 @@ class TestAgentWorkflowApproval:
                 mock_tool_execution_activity,
                 mock_get_agent_config_activity,
             ],
+            workflow_runner=_create_sandbox_runner(),
         ):
             handle = await workflow_env.client.start_workflow(
                 AgentWorkflow.run,
@@ -812,6 +841,7 @@ class TestAgentWorkflowApproval:
                 tool_activity,
                 config_activity,
             ],
+            workflow_runner=_create_sandbox_runner(),
         ):
             handle = await workflow_env.client.start_workflow(
                 AgentWorkflow.run,
@@ -890,6 +920,7 @@ class TestAgentWorkflowApproval:
                 tracking_tool_activity,
                 config_activity,
             ],
+            workflow_runner=_create_sandbox_runner(),
         ):
             await workflow_env.client.execute_workflow(
                 AgentWorkflow.run,

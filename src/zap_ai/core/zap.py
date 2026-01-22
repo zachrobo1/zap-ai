@@ -290,9 +290,11 @@ class Zap(Generic[TContext]):
                 takes precedence over `task`. Use this for vision tasks.
             follow_up_on_task: If provided, sends the task as a follow-up
                 message to an existing task instead of starting a new one.
-            context: Optional context to pass to agents with dynamic prompts.
-                Defaults to {} if not provided. Note: agents with callable
-                prompts should be given appropriate context.
+            context: Optional context to pass to agents with dynamic prompts
+                and MCP tools. For dynamic prompts, this is used to resolve
+                the prompt at runtime. For MCP tools, this is passed via the
+                `meta` parameter and can be accessed using `CurrentZapContext()`.
+                Defaults to {} if not provided.
             approval_rules: Optional rules for human-in-the-loop approval.
                 When provided, tool calls matching the patterns will pause
                 for human approval before execution.
@@ -407,6 +409,18 @@ class Zap(Generic[TContext]):
         # Resolve the prompt with context
         resolved_prompt = agent.resolve_prompt(effective_context)
 
+        # Serialize context for MCP tools
+        serialized_context: dict[str, Any] | None = None
+        if context is not None:
+            if isinstance(context, dict):
+                serialized_context = context
+            elif hasattr(context, "model_dump"):  # Pydantic model
+                serialized_context = context.model_dump()
+            elif hasattr(context, "__dict__"):
+                serialized_context = context.__dict__
+            else:
+                raise ValueError(f"Cannot serialize context of type {type(context)}")
+
         # Generate task ID
         task_id = f"{agent_name}-{uuid4().hex[:12]}"
 
@@ -449,6 +463,7 @@ class Zap(Generic[TContext]):
                 max_tokens=agent.max_tokens,
                 approval_rules=approval_rules.to_dict() if approval_rules else None,
                 tool_descriptions=tool_descriptions,
+                context=serialized_context,
             ),
             id=task_id,
             task_queue=self.task_queue,
