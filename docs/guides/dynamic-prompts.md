@@ -124,112 +124,47 @@ if agent.is_dynamic_prompt():
     print("This agent requires context")
 ```
 
-## Context Injection to MCP Tools
+## Context for MCP Tools
 
-Context passed to `execute_task()` is also automatically available to MCP tools. This allows tools to access user data, tenant information, or session state without exposing it to the LLM.
+Context passed to `execute_task()` is automatically available to your MCP tools via FastMCP's dependency injection system. This enables secure multi-tenancy, user-scoped operations, and personalized tool behavior - all while keeping sensitive identifiers hidden from the LLM.
 
-### How It Works
+**Quick Example:**
 
-When you pass context to `execute_task()`, Zap:
-
-1. Serializes the context (dict, dataclass, or Pydantic model)
-2. Passes it via FastMCP's `meta` parameter during tool execution
-3. Makes it accessible within tools via helper functions
-
-The LLM never sees this context - it's hidden from the tool schema.
-
-### Accessing Context in Tools
-
-Use dependency injection with helpers from `zap_ai.mcp.context`:
-
-```python
-from fastmcp import FastMCP
-from fastmcp.dependencies import Depends
-from zap_ai.mcp.context import ZapContext, ZapContextValue
-
-mcp = FastMCP("Order Service")
-
-@mcp.tool()
-async def get_orders(
-    limit: int = 10,
-    zap_ctx: dict = Depends(ZapContext)
-) -> str:
-    """Get recent orders for the current user."""
-    # Context is automatically injected via Depends()
-    user_id = zap_ctx.get("user_id")
-
-    if not user_id:
-        return "Error: No user context provided"
-
-    orders = await db.query_orders(user_id=user_id, limit=limit)
-    return format_orders(orders)
-
-# Or extract specific values using ZapContextValue
-Tenant = ZapContextValue("tenant", "default")
-
-@mcp.tool()
-async def tenant_search(
-    query: str,
-    tenant: str = Depends(Tenant)
-) -> str:
-    """Search within tenant's data scope."""
-    results = await search_engine.search(query, tenant_filter=tenant)
-    return format_results(results)
-```
-
-### Full Example
-
-**Zap client code:**
 ```python
 from dataclasses import dataclass
+from fastmcp import FastMCP
+from fastmcp.dependencies import Depends
 from zap_ai import Zap, ZapAgent
+from zap_ai.mcp.context import TypedZapContext
 
+# Define your context type
 @dataclass
 class UserContext:
     user_id: str
     tenant: str
-    permissions: list[str]
 
-def make_prompt(ctx: UserContext) -> str:
-    return f"You are an assistant for tenant {ctx.tenant}."
-
+# Agent with dynamic prompt
 agent = ZapAgent[UserContext](
-    name="TenantAgent",
-    prompt=make_prompt,
+    name="Assistant",
+    prompt=lambda ctx: f"You are an assistant for tenant {ctx.tenant}.",
     mcp_clients=[Client("./tools.py")],
 )
 
-zap: Zap[UserContext] = Zap(agents=[agent])
+zap = Zap(agents=[agent])
 await zap.start()
 
-# Context is used for BOTH the dynamic prompt AND tool calls
+# Context is used for BOTH the dynamic prompt AND tool access
 task = await zap.execute_task(
-    agent_name="TenantAgent",
-    task="Search for recent invoices",
-    context=UserContext(
-        user_id="user_123",
-        tenant="acme_corp",
-        permissions=["read", "write"],
-    ),
+    agent_name="Assistant",
+    task="Search for invoices",
+    context=UserContext(user_id="user_123", tenant="acme_corp"),
 )
 ```
 
-**MCP tool code:**
+**In your MCP tool:**
+
 ```python
-from dataclasses import dataclass
-from fastmcp import FastMCP
-from fastmcp.dependencies import Depends
-from zap_ai.mcp.context import TypedZapContext
-
-@dataclass
-class UserContext:
-    user_id: str
-    tenant: str
-    permissions: list[str]
-
 mcp = FastMCP("Invoice Service")
-
-# Create typed dependency
 CurrentUser = TypedZapContext(UserContext)
 
 @mcp.tool()
@@ -237,28 +172,33 @@ async def search_invoices(
     query: str,
     user_ctx: UserContext = Depends(CurrentUser)
 ) -> str:
-    """Search invoices."""
-    # Context is automatically injected and typed!
-    # Tenant isolation - tool automatically scoped to user's tenant
-    if "read" not in user_ctx.permissions:
-        return "Error: Insufficient permissions"
-
+    """Search invoices - automatically scoped to user's tenant."""
     invoices = await db.search_invoices(
         query=query,
-        tenant_filter=user_ctx.tenant,
+        tenant_filter=user_ctx.tenant,  # Secure tenant isolation
     )
     return format_invoices(invoices)
 ```
 
-### Security Considerations
+The `user_ctx` parameter is injected by FastMCP and hidden from the LLM - the AI model only sees the `query` parameter.
 
-1. **Context is hidden from the LLM** - FastMCP's dependency injection filters it from the schema
-2. **Context travels over the network** - Use it for identifiers and metadata, not secrets
-3. **Validate in tools** - Always validate that expected context values exist
+!!! info "Comprehensive MCP Context Guide"
+    For complete details on context injection including:
+
+    - Three access patterns (`ZapContext`, `ZapContextValue`, `TypedZapContext`)
+    - Type safety and automatic deserialization
+    - Security best practices
+    - Troubleshooting and advanced patterns
+
+    See the [**FastMCP Context Injection Guide**](fastmcp-client-context.md)
 
 ## API Reference
 
-See the full API documentation:
+For dynamic prompts:
 
-- [`ZapAgent`](../api/core.md#zap_ai.ZapAgent) - Agent configuration
-- [`Zap.execute_task`](../api/core.md#zap_ai.Zap.execute_task) - Execute with context
+- [`ZapAgent`](../api/core.md#zap_ai.ZapAgent) - Agent configuration with `prompt` parameter
+- [`Zap.execute_task`](../api/core.md#zap_ai.Zap.execute_task) - Execute tasks with context
+
+For MCP context injection:
+
+- [FastMCP Context Injection Guide](fastmcp-client-context.md) - Complete reference for accessing context in tools
