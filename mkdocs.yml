@@ -37,12 +37,14 @@ nav:
       - Streaming Events: guides/streaming.md
       - Approval Workflows: guides/approval-workflows.md
       - Multimodal Vision: guides/multimodal-vision.md
+      - FastMCP Context Injection: guides/fastmcp-client-context.md
       - MCP Sampling: guides/mcp-sampling.md
       - Observability: guides/observability.md
   - API Reference:
       - Overview: api/index.md
       - Core: api/core.md
       - Conversation: api/conversation.md
+      - Message Types: api/message-types.md
       - Streaming: api/streaming.md
       - Tracing: api/tracing.md
       - Worker: api/worker.md

@@ -39,106 +39,21 @@ Zap is an opinionated library for building **resilient AI agents** on top of Tem
 ## Package Structure
 ```
 src/zap_ai/
-├── __init__.py         # Public API exports (Zap, ZapAgent, Task, TaskStatus, ApprovalRules, ZapContext, ZapContextValue, TypedZapContext)
+├── __init__.py         # Public API exports
 ├── exceptions.py       # All custom exceptions (consolidated, all inherit from ZapError)
-├── utils.py            # Shared utility functions (e.g., parse_tool_arguments)
+├── utils.py            # Shared utility functions
 ├── core/               # Core models (Zap, ZapAgent, Task)
-│   ├── __init__.py     # Re-exports core types
-│   ├── agent.py        # ZapAgent configuration model
-│   ├── task.py         # Task execution tracking model
-│   ├── types.py        # Type aliases (TContext, DynamicPrompt)
-│   ├── validation.py   # Extracted validation functions
-│   └── zap.py          # Main Zap orchestrator (start, execute_task, get_task, get_agent_tools)
 ├── conversation/       # Conversation history parsing
-│   ├── __init__.py     # Exports ConversationTurn, ToolCallInfo
-│   ├── models.py       # ConversationTurn, ToolCallInfo dataclasses
-│   └── parser.py       # History parsing functions (get_turns, get_tool_calls, etc.)
 ├── workflows/          # Temporal workflow definitions
-│   ├── __init__.py
-│   ├── agent_workflow.py # Main agentic loop workflow (includes approval handling)
-│   └── models.py       # Workflow input/state models (ApprovalRules, ApprovalRequest, ApprovalDecision)
 ├── activities/         # Temporal activities (inference, tool execution)
-│   ├── __init__.py
-│   ├── inference.py    # LLM inference activity (via LiteLLM)
-│   ├── tool_execution.py # MCP tool execution activity
-│   └── agent_config.py # Agent configuration activity
 ├── llm/                # LLM provider abstraction
-│   ├── __init__.py
-│   ├── provider.py     # LiteLLM wrapper
-│   └── message_types.py # Message, ToolCall, InferenceResult, TextContent, ImageContent, ContentPart
 ├── mcp/                # MCP client management and tool registry
-│   ├── __init__.py
-│   ├── client_manager.py # FastMCP client lifecycle
-│   ├── context.py        # ZapContext dependency injection helpers (import: `from zap_ai.mcp.context import ZapContext, ZapContextValue, TypedZapContext`)
-│   ├── sampling.py       # MCP sampling handlers - import directly: `from zap_ai.mcp.sampling import create_mcp_client, LiteLLMSamplingHandler`
-│   ├── schema_converter.py # MCP to LiteLLM schema conversion
-│   └── tool_registry.py # Tool discovery and caching (get_tools_for_agent)
+│   ├── context.py      # ZapContext dependency injection helpers
+│   └── sampling.py     # MCP sampling handlers
 ├── streaming/          # Streaming event support
-│   ├── __init__.py     # Exports streaming types
-│   └── events.py       # Event dataclasses (ThinkingEvent, ToolCallEvent, etc.)
 ├── tracing/            # Observability providers
-│   ├── __init__.py     # Global provider registry (set_tracing_provider, get_tracing_provider)
-│   ├── protocol.py     # TracingProvider protocol, TraceContext
-│   ├── base.py         # BaseTracingProvider ABC for custom providers
-│   ├── noop_provider.py # No-op fallback
-│   └── langfuse_provider.py # Langfuse implementation
 └── worker/             # Worker process for running workflows
-    ├── __init__.py     # Public API (create_worker, run_worker, run_worker_with_zap, create_production_runner, production_restrictions)
-    ├── worker.py       # Worker creation functions (run_worker)
-    ├── sandbox.py      # Temporal sandbox configuration (factory functions, restrictions)
-    └── __main__.py     # CLI entry point (python -m zap_ai.worker)
 ```
-
-## Main Classes
-
-### Core
-- `Zap` - Main orchestrator that manages agents and Temporal connections
-- `ZapAgent[TContext]` - Configuration for an AI agent (name, prompt, model, tools, sub-agents, temperature, max_tokens)
-- `Task` - Represents an executing or completed task with rich inspection methods
-
-### Task Inspection
-- `TaskStatus` - Enum: PENDING, THINKING, AWAITING_TOOL, AWAITING_APPROVAL, COMPLETED, FAILED
-- `ToolCallInfo` - Information about a tool call and its result
-- `ConversationTurn` - A single turn in the conversation
-
-### Multimodal Content
-- `TextContent` - Text content part in a multimodal message
-- `ImageContent` - Image content part with `from_url()` and `from_base64()` factory methods
-- `ContentPart` - Type alias: `TextContent | ImageContent`
-- `MessageContent` - Type alias: `str | list[ContentPart]` (backwards compatible with text-only)
-
-### Streaming Events
-- `StreamEvent` - Base class for all streaming events (with type, timestamp, task_id, seq)
-- `ThinkingEvent` - Emitted when LLM starts reasoning (iteration number)
-- `ToolCallEvent` - Emitted when a tool is called (name, arguments, phrase)
-- `ToolResultEvent` - Emitted when tool execution completes (name, result, success)
-- `TokenEvent` - Individual token streaming (Phase 2, not yet implemented)
-- `CompletedEvent` - Task completed successfully (result)
-- `ErrorEvent` - Task failed (error message)
-
-### Approval Workflows
-- `ApprovalRules` - Glob patterns for tools requiring approval, with timeout
-- `ApprovalRequest` - Pending approval request with tool name, args, timestamps
-- `ApprovalDecision` - Approval/rejection decision with reason
-
-### Tracing
-- `TracingProvider` - Protocol for tracing implementations
-- `BaseTracingProvider` - ABC for custom provider implementation
-- `LangfuseTracingProvider` - Langfuse integration
-- `NoOpTracingProvider` - Fallback (no-op)
-
-## Exception Hierarchy
-All exceptions inherit from `ZapError`:
-- `ZapConfigurationError` - Invalid Zap configuration
-- `ZapNotStartedError` - Operations before start()
-- `AgentNotFoundError` - Unknown agent reference
-- `TaskNotFoundError` - Unknown task reference
-- `VisionNotSupportedError` - Images sent to non-vision model
-- `ToolNotFoundError` - Tool not found
-- `ToolExecutionError` - Tool execution failure
-- `ClientConnectionError` - MCP client connection failure
-- `SchemaConversionError` - Schema conversion failure
-- `LLMProviderError` - LLM provider failure
 
 ## Architecture Flow
 1. User creates `ZapAgent` configurations and a `Zap` instance
@@ -153,77 +68,26 @@ All exceptions inherit from `ZapError`:
 8. `continue-as-new` prevents event history from growing unbounded
 9. `stream_task()` polls workflow via Temporal query to yield events in real-time
 
-## Context Injection
+## Exception Hierarchy
+All exceptions inherit from `ZapError`:
+- `ZapConfigurationError`, `ZapNotStartedError`, `AgentNotFoundError`, `TaskNotFoundError`
+- `VisionNotSupportedError`, `ToolNotFoundError`, `ToolExecutionError`
+- `ClientConnectionError`, `SchemaConversionError`, `LLMProviderError`
+
+## Context Injection Pattern
 
 Context passed to `execute_task()` serves two purposes:
 1. **Dynamic prompts** - Resolve `prompt=lambda ctx: f"..."` at runtime
 2. **MCP tool injection** - Pass context to tools via FastMCP's dependency injection
 
-**Accessing context in MCP tools (Dependency Injection - ONLY APPROACH):**
-```python
-from fastmcp import FastMCP
-from fastmcp.dependencies import Depends
-from zap_ai.mcp.context import ZapContext, ZapContextValue, TypedZapContext
+Context is injected to MCP tools using the `Depends()` pattern with these helpers:
+- `ZapContext` - Full context dict (or typed object if metadata present)
+- `ZapContextValue(key, default)` - Factory for extracting specific values
+- `TypedZapContext(context_type)` - Factory for type-safe deserialization
 
-mcp = FastMCP("MyService")
+The context dependencies are hidden from the LLM schema - it only sees regular tool parameters.
 
-# Option 1: Full dict context
-@mcp.tool()
-async def my_tool(query: str, zap_ctx: dict = Depends(ZapContext)) -> str:
-    user_id = zap_ctx.get("user_id")
-    ...
-
-# Option 2: Extract specific values
-UserId = ZapContextValue("user_id")
-Tenant = ZapContextValue("tenant", "default")
-
-@mcp.tool()
-async def tenant_search(
-    query: str,
-    user_id: str | None = Depends(UserId),
-    tenant: str = Depends(Tenant)
-) -> str:
-    ...
-
-# Option 3: Typed context (Pydantic/dataclass)
-from dataclasses import dataclass
-
-@dataclass
-class UserSession:
-    user_id: str
-    tenant: str
-
-CurrentSession = TypedZapContext(UserSession)
-
-@mcp.tool()
-async def get_orders(
-    limit: int = 10,
-    session: UserSession = Depends(CurrentSession)
-) -> str:
-    # Full type safety and IDE autocomplete!
-    orders = await db.query(user_id=session.user_id)
-    ...
-```
-
-The context dependencies are hidden from the LLM schema - it only sees the regular tool parameters.
-
-## Zap Methods
-- `start()` - Connect to Temporal, initialize MCP clients
-- `stop()` - Graceful shutdown
-- `execute_task(agent_name, task, context=None)` - Start a task; context is used for dynamic prompts AND injected to MCP tools
-- `stream_task()` - Execute task and stream events via async generator
-- `get_task()` - Retrieve task by ID
-- `get_agent()` - Get agent configuration
-- `get_agent_tools()` - Get tools available to an agent
-
-## Task Methods (on Task object)
-- `get_text_content()` - All text from user + assistant messages
-- `get_tool_calls()` - All tool calls with results
-- `get_turns()` / `get_turn(n)` - Conversation turns
-- `turn_count()` - Number of turns
-- `get_sub_tasks()` - Fetch child task objects
-- `get_pending_approvals()` - Pending approval requests
-- `approve(id)` / `reject(id, reason)` - Respond to approvals
+See `api_quick_reference.md` for code examples and detailed API signatures.
 
 ## Release & Documentation
 - **GitHub Pages docs**: https://zachrobo1.github.io/zap-ai/
