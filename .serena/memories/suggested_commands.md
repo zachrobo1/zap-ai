@@ -16,6 +16,27 @@ uv run pre-commit install
 ```
 
 ## Testing
+
+### Testing Strategy
+
+**Unit vs Integration Tests:**
+- **Unit tests** (`tests/unit/`) - Test individual modules in isolation
+  - Mock external dependencies (LiteLLM, MCP clients, Temporal)
+  - Fast execution, no external services required
+  - Cover: core models, validation, schema conversion, conversation parsing
+  
+- **Integration tests** (`tests/integration/`) - Test full workflows
+  - Require Temporal server running (`temporal server start-dev`)
+  - Test actual workflow execution, approvals, streaming
+  - Cover: end-to-end scenarios, multi-agent coordination, real tool execution
+
+**Test File Organization:**
+- Mirror source structure: `tests/unit/core/test_agent.py` for `src/zap_ai/core/agent.py`
+- Test class names: `TestZapAgentCreation`, `TestApprovalWorkflow`
+- Test method names: `test_empty_name_rejected`, `test_valid_config_accepted`
+
+### Running Tests
+
 ```bash
 # Run all unit tests
 uv run pytest tests/unit/ -v
@@ -32,6 +53,9 @@ uv run pytest tests/unit/ --cov=src/zap_ai --cov-report=term-missing
 # Run integration tests (requires Temporal server running)
 temporal server start-dev  # In separate terminal
 uv run pytest tests/integration/ -v
+
+# Run specific integration test
+uv run pytest tests/integration/test_workflow.py -v -s
 ```
 
 ## Linting & Formatting

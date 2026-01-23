@@ -18,6 +18,12 @@ from zap_ai import (
     ToolCallInfo,
     ConversationTurn,
 
+    # Multimodal message types
+    TextContent,
+    ImageContent,
+    ContentPart,
+    MessageContent,
+
     # Streaming events
     ThinkingEvent,
     ToolCallEvent,
@@ -25,6 +31,10 @@ from zap_ai import (
     TokenEvent,
     CompletedEvent,
     ErrorEvent,
+
+    # Approval workflows
+    ApprovalRules,
+    ApprovalRequest,
 
     # Type helpers
     TContext,
@@ -45,6 +55,7 @@ from zap_ai import (
 |--------|-------------|
 | [Core](core.md) | Main classes: `Zap`, `ZapAgent`, `Task`, `TaskStatus` |
 | [Conversation](conversation.md) | History parsing: `ConversationTurn`, `ToolCallInfo` |
+| [Message Types](message-types.md) | Multimodal content: `TextContent`, `ImageContent`, etc. |
 | [Streaming](streaming.md) | Event types: `ThinkingEvent`, `ToolCallEvent`, etc. |
 | [Tracing](tracing.md) | Observability: tracing providers and protocols |
 | [Worker](worker.md) | Temporal worker utilities |

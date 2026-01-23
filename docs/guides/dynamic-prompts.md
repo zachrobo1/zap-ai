@@ -140,23 +140,22 @@ The LLM never sees this context - it's hidden from the tool schema.
 
 ### Accessing Context in Tools
 
-Use the helpers from `zap_ai.mcp.context`:
+Use dependency injection with helpers from `zap_ai.mcp.context`:
 
 ```python
-from fastmcp import FastMCP, Context
-from fastmcp.server.dependencies import CurrentContext
-from zap_ai.mcp.context import get_zap_context, get_zap_context_value
+from fastmcp import FastMCP
+from fastmcp.dependencies import Depends
+from zap_ai.mcp.context import ZapContext, ZapContextValue
 
 mcp = FastMCP("Order Service")
 
 @mcp.tool()
 async def get_orders(
     limit: int = 10,
-    ctx: Context = CurrentContext()
+    zap_ctx: dict = Depends(ZapContext)
 ) -> str:
     """Get recent orders for the current user."""
-    # Get the full context dict
-    zap_ctx = get_zap_context(ctx)
+    # Context is automatically injected via Depends()
     user_id = zap_ctx.get("user_id")
 
     if not user_id:
@@ -165,14 +164,15 @@ async def get_orders(
     orders = await db.query_orders(user_id=user_id, limit=limit)
     return format_orders(orders)
 
+# Or extract specific values using ZapContextValue
+Tenant = ZapContextValue("tenant", "default")
+
 @mcp.tool()
 async def tenant_search(
     query: str,
-    ctx: Context = CurrentContext()
+    tenant: str = Depends(Tenant)
 ) -> str:
     """Search within tenant's data scope."""
-    # Get a specific value with default
-    tenant = get_zap_context_value(ctx, "tenant", "default")
     results = await search_engine.search(query, tenant_filter=tenant)
     return format_results(results)
 ```
@@ -216,30 +216,36 @@ task = await zap.execute_task(
 
 **MCP tool code:**
 ```python
-from fastmcp import FastMCP, Context
-from fastmcp.server.dependencies import CurrentContext
-from zap_ai.mcp.context import get_zap_context
+from dataclasses import dataclass
+from fastmcp import FastMCP
+from fastmcp.dependencies import Depends
+from zap_ai.mcp.context import TypedZapContext
+
+@dataclass
+class UserContext:
+    user_id: str
+    tenant: str
+    permissions: list[str]
 
 mcp = FastMCP("Invoice Service")
+
+# Create typed dependency
+CurrentUser = TypedZapContext(UserContext)
 
 @mcp.tool()
 async def search_invoices(
     query: str,
-    ctx: Context = CurrentContext()
+    user_ctx: UserContext = Depends(CurrentUser)
 ) -> str:
     """Search invoices."""
-    zap_ctx = get_zap_context(ctx)
-
+    # Context is automatically injected and typed!
     # Tenant isolation - tool automatically scoped to user's tenant
-    tenant = zap_ctx.get("tenant")
-    permissions = zap_ctx.get("permissions", [])
-
-    if "read" not in permissions:
+    if "read" not in user_ctx.permissions:
         return "Error: Insufficient permissions"
 
     invoices = await db.search_invoices(
         query=query,
-        tenant_filter=tenant,
+        tenant_filter=user_ctx.tenant,
     )
     return format_invoices(invoices)
 ```

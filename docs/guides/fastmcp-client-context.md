@@ -4,7 +4,7 @@ Zap automatically passes context (user data, session info, tenant IDs) to your M
 
 ## Basic Usage
 
-Pass context when executing a task, then access it in your tools using helper functions:
+Pass context when executing a task, then access it in your tools using FastMCP's dependency injection system:
 
 **Client code:**
 ```python
@@ -31,9 +31,9 @@ result = await zap.execute_task(
 
 **Tool code (MCP server):**
 ```python
-from fastmcp import FastMCP, Context
-from fastmcp.server.dependencies import CurrentContext
-from zap_ai.mcp.context import get_zap_context
+from fastmcp import FastMCP
+from fastmcp.dependencies import Depends
+from zap_ai.mcp.context import ZapContext
 
 mcp = FastMCP("Document Tools")
 
@@ -41,11 +41,10 @@ mcp = FastMCP("Document Tools")
 async def search_documents(
     query: str,
     limit: int = 10,
-    ctx: Context = CurrentContext()
+    zap_ctx: dict = Depends(ZapContext)
 ) -> str:
     """Search for documents in the user's tenant."""
-    # Extract context passed from Zap
-    zap_ctx = get_zap_context(ctx)
+    # Extract context values
     user_id = zap_ctx.get("user_id")
     tenant = zap_ctx.get("tenant")
 
@@ -63,7 +62,7 @@ async def search_documents(
     return format_results(results)
 ```
 
-The `ctx: Context = CurrentContext()` parameter is hidden from the LLM via FastMCP's dependency injection system. The AI model only sees `query` and `limit` in the tool schema.
+The `zap_ctx: dict = Depends(ZapContext)` parameter is hidden from the LLM via FastMCP's dependency injection system. The AI model only sees `query` and `limit` in the tool schema.
 
 ## Typed Context with Automatic Deserialization
 
@@ -110,20 +109,22 @@ result = await zap.execute_task(
 
 **Tool with typed deserialization:**
 ```python
-from fastmcp import Context
-from fastmcp.server.dependencies import CurrentContext
-from zap_ai.mcp.context import deserialize_zap_context
+from fastmcp import FastMCP
+from fastmcp.dependencies import Depends
+from zap_ai.mcp.context import TypedZapContext
+
+mcp = FastMCP("Document Tools")
+
+# Create a reusable typed dependency
+CurrentUser = TypedZapContext(UserContext)
 
 @mcp.tool()
 async def delete_document(
     filename: str,
-    ctx: Context = CurrentContext()
+    user_ctx: UserContext = Depends(CurrentUser)
 ) -> str:
     """Delete a document."""
-    # Automatically deserialize to UserContext
-    user_ctx = deserialize_zap_context(ctx, UserContext)
-
-    # Type-safe access with IDE autocomplete
+    # user_ctx is fully typed with IDE autocomplete
     if "delete" not in user_ctx.permissions:
         return "Error: You don't have permission to delete documents"
 
@@ -145,79 +146,109 @@ async def delete_document(
 
 ## Context Access Patterns
 
-Zap provides four helper functions for accessing context. Choose based on your needs:
+Zap provides three dependency injection helpers for accessing context. Choose based on your needs:
 
-### `get_zap_context(ctx) -> dict`
+### `ZapContext` - Full Context Dict
 
-Extract the full context as a dictionary.
+Extract the complete context as a dictionary.
 
 **Use when**: You need the complete context or working with plain dict contexts.
 
 ```python
-from zap_ai.mcp.context import get_zap_context
+from fastmcp import FastMCP
+from fastmcp.dependencies import Depends
+from zap_ai.mcp.context import ZapContext
+
+mcp = FastMCP("My Service")
 
 @mcp.tool()
-async def my_tool(ctx: Context = CurrentContext()) -> str:
-    zap_ctx = get_zap_context(ctx)
+async def my_tool(
+    query: str,
+    zap_ctx: dict = Depends(ZapContext)
+) -> str:
+    """A tool that needs full context."""
     user_id = zap_ctx.get("user_id")
     tenant = zap_ctx.get("tenant")
     # ... use values
 ```
 
-### `get_zap_context_value(ctx, key, default) -> Any`
+**Note**: If the context was created with a Pydantic model or dataclass, `ZapContext` will automatically deserialize it back to the typed object (not a dict). To always get a dict, access individual fields using `ZapContextValue` instead.
 
-Extract a specific value from context with a default.
+---
 
-**Use when**: You only need one specific value.
+### `ZapContextValue(key, default)` - Extract Specific Values
+
+Create a dependency that extracts a specific value from context with a default.
+
+**Use when**: You only need one or two specific values.
 
 ```python
-from zap_ai.mcp.context import get_zap_context_value
+from fastmcp import FastMCP
+from fastmcp.dependencies import Depends
+from zap_ai.mcp.context import ZapContextValue
+
+mcp = FastMCP("Search Service")
+
+# Create reusable dependencies
+Tenant = ZapContextValue("tenant", "default")
+UserId = ZapContextValue("user_id")
 
 @mcp.tool()
-async def tenant_search(query: str, ctx: Context = CurrentContext()) -> str:
-    tenant = get_zap_context_value(ctx, "tenant", "default")
+async def tenant_search(
+    query: str,
+    tenant: str = Depends(Tenant),
+    user_id: str | None = Depends(UserId)
+) -> str:
+    """Search within tenant's data scope."""
+    if not user_id:
+        return "Error: User not authenticated"
     return await search_engine.search(query, tenant_filter=tenant)
 ```
 
-### `deserialize_zap_context(ctx, expected_type=None) -> T | dict`
+**Benefits**:
+- Cleaner function signatures
+- Reusable dependencies across tools
+- Explicit defaults in one place
 
-Automatically deserialize context to its original typed form.
+---
 
-**Use when**: You want type-safe access with optional validation and graceful fallback.
+### `TypedZapContext(context_type)` - Type-Safe Extraction
 
-```python
-from zap_ai.mcp.context import deserialize_zap_context
+Create a dependency that deserializes context to a specific typed object with validation.
 
-@mcp.tool()
-async def update_settings(theme: str, ctx: Context = CurrentContext()) -> str:
-    # Automatically reconstructs UserContext if type metadata present
-    user_ctx = deserialize_zap_context(ctx, UserContext)
-
-    # Type-safe access (or dict if type unavailable)
-    if isinstance(user_ctx, UserContext):
-        await db.update_user(user_ctx.user_id, {"theme": theme})
-```
-
-### `get_typed_zap_context(ctx, context_type) -> T`
-
-Strict type-safe extraction with required validation.
-
-**Use when**: You require guaranteed type safety for critical operations.
+**Use when**: You want guaranteed type safety for critical operations.
 
 ```python
-from zap_ai.mcp.context import get_typed_zap_context
+from dataclasses import dataclass
+from fastmcp import FastMCP
+from fastmcp.dependencies import Depends
+from zap_ai.mcp.context import TypedZapContext
+
+@dataclass
+class SessionContext:
+    user_id: str
+    authenticated: bool
+    role: str
+
+mcp = FastMCP("Payment Service")
+
+# Create typed dependency
+CurrentSession = TypedZapContext(SessionContext)
 
 @mcp.tool()
-async def charge_payment(amount: float, ctx: Context = CurrentContext()) -> str:
-    # Raises TypeError if context can't be deserialized to SessionContext
-    session = get_typed_zap_context(ctx, SessionContext)
-
-    # session is guaranteed to be SessionContext
+async def charge_payment(
+    amount: float,
+    session: SessionContext = Depends(CurrentSession)
+) -> str:
+    """Process a payment."""
+    # session is guaranteed to be SessionContext or raises TypeError
     if not session.authenticated:
         return "Error: Not authenticated"
 
     return await payment_service.charge(session.user_id, amount)
 ```
+
+**Error handling**: Raises `TypeError` if context cannot be deserialized to the expected type.
 
 ## Security Best Practices
 
@@ -242,19 +273,27 @@ context = {"user_id": "user_123", "api_key": "sk_live_123..."}
 Check that required context values exist and have valid types:
 
 ```python
-@mcp.tool()
-async def protected_action(ctx: Context = CurrentContext()) -> str:
-    user_ctx = deserialize_zap_context(ctx, UserContext)
+from fastmcp import FastMCP
+from fastmcp.dependencies import Depends
+from zap_ai.mcp.context import TypedZapContext
 
-    # Validate required fields
-    if not isinstance(user_ctx, UserContext):
-        return "Error: Invalid context type"
+mcp = FastMCP("Protected Service")
+CurrentUser = TypedZapContext(UserContext)
+
+@mcp.tool()
+async def protected_action(
+    action: str,
+    user_ctx: UserContext = Depends(CurrentUser)
+) -> str:
+    """Perform a protected action."""
+    # TypedZapContext raises TypeError if context is invalid
+    # At this point, user_ctx is guaranteed to be UserContext
 
     if not user_ctx.user_id:
         return "Error: User ID required"
 
     # Safe to proceed
-    return await perform_action(user_ctx)
+    return await perform_action(user_ctx, action)
 ```
 
 ### 4. Type safety reduces bugs
@@ -296,9 +335,9 @@ Context flows from your Zap workflow to MCP tools through FastMCP's `meta` param
 │                      FastMCP Server                             │
 │                                                                 │
 │  @mcp.tool()                                                    │
-│  async def my_tool(query: str, ctx = CurrentContext()):         │
-│      zap_ctx = get_zap_context(ctx)  # Extracts from meta       │
-│      # ctx parameter hidden from LLM schema                     │
+│  async def my_tool(query: str, ctx = Depends(ZapContext)):      │
+│      # ZapContext extracts from meta, deserializes if typed     │
+│      # Dependency parameter hidden from LLM schema              │
 └─────────────────────────────────────────────────────────────────┘
 ```
 
@@ -319,9 +358,9 @@ UserContext(user_id="123", tenant="acme")
 }
 ```
 
-The `deserialize_zap_context()` function uses this metadata to reconstruct the original type:
+The `ZapContext` and `TypedZapContext` dependencies use this metadata to reconstruct the original type:
 1. Dynamically imports the type using `importlib`
-2. Validates the type if `expected_type` is provided
+2. Validates the type if using `TypedZapContext`
 3. Reconstructs using `model_validate()` (Pydantic) or constructor (dataclass)
 4. Falls back to dict with warning if type cannot be imported
 
@@ -329,31 +368,27 @@ Plain dicts pass through unchanged without metadata.
 
 ### Why LLM Can't See Context
 
-FastMCP's dependency injection system uses `CurrentContext()` to inject the Context object. When FastMCP generates the tool schema for the LLM, it filters out all dependency parameters. The LLM only sees the "regular" parameters (like `query` and `limit`), never the context.
+FastMCP's dependency injection system uses `Depends()` to inject dependencies. When FastMCP generates the tool schema for the LLM, it filters out all dependency parameters. The LLM only sees the "regular" parameters (like `query` and `limit`), never the context.
 
-## Advanced: Type Metadata
+## Advanced: Dependency Injection Pattern
 
-For advanced use cases where you need to understand the type reconstruction mechanism.
-
-### Type Metadata Format
+The Zap context injection system follows FastMCP's standard dependency injection pattern:
 
 ```python
-{
-    "user_id": "123",
-    "tenant": "acme",
-    "__zap_context_type__": "module.path.ClassName",  # Fully qualified name
-    "__zap_context_version__": "1"  # Version for future compatibility
-}
+# These are dependency factories - they return functions that extract context
+ZapContext          # Returns: (ctx: Context) -> dict | typed_object
+ZapContextValue(k)  # Returns: (ctx: Context) -> Any
+TypedZapContext(T)  # Returns: (ctx: Context) -> T
+
+# Use with Depends() in your tools
+@mcp.tool()
+async def tool(
+    param: str,
+    # Depends() tells FastMCP to call the dependency function
+    ctx_value: dict = Depends(ZapContext)
+):
+    ...
 ```
-
-### Import Resolution
-
-The `deserialize_zap_context()` function:
-1. Extracts `__zap_context_type__` from context
-2. Parses it as `module_name.ClassName`
-3. Uses `importlib.import_module()` to load the module
-4. Retrieves the class with `getattr()`
-5. Reconstructs the instance
 
 **Important**: The context class must be importable from the MCP tool's Python environment. If you define `UserContext` in your client code but the MCP server can't import it, deserialization will fall back to dict.
 
@@ -374,7 +409,7 @@ Custom classes without these methods will return as dict.
 **Solution**:
 - Define shared context types in a common module both client and server can import
 - Or use plain dicts for simple cases
-- The tool will still work with dict access: `get_zap_context(ctx)`
+- The tool will still work with dict access via `ZapContext`
 
 ### Context is empty ({}) in tools
 
@@ -383,92 +418,115 @@ Custom classes without these methods will return as dict.
 **Solution**:
 - Verify you're passing `context=` parameter to `execute_task()`
 - Check that FastMCP version is >= 2.13.1 (meta parameter support)
-- Ensure `ctx: Context = CurrentContext()` is in your tool signature
+- Ensure you're using `Depends(ZapContext)` or similar in your tool signature
 
-### Type mismatch error after renaming class
+### TypeError: Expected context of type X
 
-**Cause**: Type metadata uses fully qualified name (`module.ClassName`). Old serialized contexts still reference the old name.
+**Cause**: Using `TypedZapContext` but the actual context doesn't match the expected type.
 
 **Solution**:
-- Version your context types to handle migrations
-- Or keep backward compatibility by maintaining old class names
-- Or clear any cached/persistent workflow data
+- Verify you're passing the correct context type in `execute_task()`
+- Check that type metadata is present (context was created with Pydantic/dataclass)
+- Use plain `ZapContext` if you want automatic fallback to dict
 
-### get_zap_context() returns {} but I passed context
+### Context returns {} but I passed context
 
-**Cause**: The helper functions return `{}` instead of `None` when no context exists.
+**Cause**: The dependency returns `{}` instead of `None` when no context exists.
 
 **Solution**: Check for specific required fields instead:
 ```python
-zap_ctx = get_zap_context(ctx)
-if not zap_ctx.get("user_id"):
-    return "Error: user_id required"
+from fastmcp.dependencies import Depends
+from zap_ai.mcp.context import ZapContext
+
+@mcp.tool()
+async def tool(zap_ctx: dict = Depends(ZapContext)) -> str:
+    if not zap_ctx.get("user_id"):
+        return "Error: user_id required"
+    ...
 ```
 
-## Function Reference
+## API Reference
 
-### `get_zap_context(ctx: Context) -> dict[str, Any]`
+### `ZapContext`
 
-Extract raw context as a dictionary. Returns `{}` if no context provided.
+A FastMCP dependency that deserializes the full ZapContext. Use with `Depends()`.
 
+**Returns**: Deserialized context dict, or the typed object if context was created with Pydantic/dataclass. Returns `{}` if no context provided.
+
+**Example**:
 ```python
-zap_ctx = get_zap_context(ctx)
-user_id = zap_ctx.get("user_id")
-```
+from fastmcp import FastMCP
+from fastmcp.dependencies import Depends
+from zap_ai.mcp.context import ZapContext
 
----
-
-### `get_zap_context_value(ctx: Context, key: str, default: T = None) -> T`
-
-Extract a specific value from context with a default.
-
-**Parameters**:
-- `ctx`: FastMCP Context object
-- `key`: Key to extract
-- `default`: Default value if key not present
-
-```python
-tenant = get_zap_context_value(ctx, "tenant", "default")
-```
-
----
-
-### `deserialize_zap_context(ctx: Context, expected_type: type[T] | None = None) -> T | dict[str, Any]`
-
-Deserialize context to its original typed form (Pydantic/dataclass) with optional validation.
-
-**Parameters**:
-- `ctx`: FastMCP Context object
-- `expected_type`: Optional type for validation
-
-**Returns**: Typed instance if metadata present and importable, otherwise dict.
-
-**Raises**: `TypeError` if expected_type provided and doesn't match actual type.
-
-```python
-# Without validation
-user_ctx = deserialize_zap_context(ctx)
-
-# With type validation
-user_ctx = deserialize_zap_context(ctx, UserContext)
+@mcp.tool()
+async def my_tool(zap_ctx: dict = Depends(ZapContext)) -> str:
+    user_id = zap_ctx.get("user_id")
+    ...
 ```
 
 ---
 
-### `get_typed_zap_context(ctx: Context, context_type: type[T]) -> T`
+### `ZapContextValue(key: str, default: Any = None)`
 
-Type-safe context extraction with strict validation.
+Factory that creates a FastMCP dependency for extracting a specific value from context.
 
 **Parameters**:
-- `ctx`: FastMCP Context object
-- `context_type`: Required type class
+- `key`: The key to extract from context
+- `default`: Default value if key not present (default: `None`)
 
-**Returns**: Typed context instance (guaranteed to be of context_type).
+**Returns**: A dependency function suitable for use with `Depends()`
 
-**Raises**: `TypeError` if context cannot be deserialized to expected type.
-
+**Example**:
 ```python
-session = get_typed_zap_context(ctx, SessionContext)  # Guaranteed type or error
+from fastmcp import FastMCP
+from fastmcp.dependencies import Depends
+from zap_ai.mcp.context import ZapContextValue
+
+# Create reusable dependencies
+Tenant = ZapContextValue("tenant", "default")
+UserId = ZapContextValue("user_id")
+
+@mcp.tool()
+async def tool(
+    tenant: str = Depends(Tenant),
+    user_id: str | None = Depends(UserId)
+) -> str:
+    ...
+```
+
+---
+
+### `TypedZapContext(context_type: type[T])`
+
+Factory that creates a FastMCP dependency for type-safe context deserialization with validation.
+
+**Parameters**:
+- `context_type`: The expected context class (Pydantic model or dataclass)
+
+**Returns**: A dependency function that deserializes to the specified type
+
+**Raises**: `TypeError` if context cannot be deserialized to the expected type
+
+**Example**:
+```python
+from dataclasses import dataclass
+from fastmcp import FastMCP
+from fastmcp.dependencies import Depends
+from zap_ai.mcp.context import TypedZapContext
+
+@dataclass
+class SessionContext:
+    user_id: str
+    role: str
+
+# Create typed dependency
+CurrentSession = TypedZapContext(SessionContext)
+
+@mcp.tool()
+async def tool(session: SessionContext = Depends(CurrentSession)) -> str:
+    # session is guaranteed to be SessionContext
+    ...
 ```
 
 ## Requirements
