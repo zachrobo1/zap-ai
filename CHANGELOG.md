@@ -1,5 +1,21 @@
 # Changelog
 
+## [0.4.0](https://github.com/zachrobo1/zap-ai/compare/v0.3.1...v0.4.0) (2026-01-23)
+
+
+### Features
+
+* Add context injection for MCP tools ([#19](https://github.com/zachrobo1/zap-ai/issues/19)) ([2693c8f](https://github.com/zachrobo1/zap-ai/commit/2693c8f1094e021529d8ce4b551f7618783e6f17))
+* add multimodal/vision support for image inputs ([#15](https://github.com/zachrobo1/zap-ai/issues/15)) ([88b1239](https://github.com/zachrobo1/zap-ai/commit/88b12395ed38093fc73c6eab1494d4a3958707eb))
+* add streaming events API for real-time task progress ([#16](https://github.com/zachrobo1/zap-ai/issues/16)) ([dee720a](https://github.com/zachrobo1/zap-ai/commit/dee720afdbcce4a00f4e87a72d1ff484ae87128b))
+* **agent:** add temperature and max_tokens configuration options ([ba67271](https://github.com/zachrobo1/zap-ai/commit/ba67271a122dcbec50bcbb9e9e10d9b5fb29b82e))
+
+
+### Documentation
+
+* Fix critical context injection API errors and improve documentation structure ([#20](https://github.com/zachrobo1/zap-ai/issues/20)) ([b2265c3](https://github.com/zachrobo1/zap-ai/commit/b2265c380e9b8700e3c00ee94631a2fe644648c5))
+* update import paths for MCP sampling module ([#17](https://github.com/zachrobo1/zap-ai/issues/17)) ([18eaf35](https://github.com/zachrobo1/zap-ai/commit/18eaf35ac67a9470749ce36516ff9ce105f631d1))
+
 ## [0.3.1](https://github.com/zachrobo1/zap-ai/compare/v0.3.0...v0.3.1) (2026-01-13)
 
 
