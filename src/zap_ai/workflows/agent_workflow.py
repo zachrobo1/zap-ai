@@ -94,6 +94,9 @@ class AgentWorkflow:
         # Tracing context (set in run())
         self._trace_context: TraceContext | None = None
 
+        # ZapContext for MCP tools (set in run())
+        self._context: dict[str, Any] | None = None
+
         # Streaming event buffer
         self._events: list[dict[str, Any]] = []
         self._event_seq: int = 0
@@ -265,6 +268,7 @@ class AgentWorkflow:
         self._temperature = input.temperature
         self._max_tokens = input.max_tokens
         self._tool_descriptions = input.tool_descriptions
+        self._context = input.context
         self._approval_rules = (
             ApprovalRules.from_dict(input.approval_rules) if input.approval_rules else None
         )
@@ -336,6 +340,7 @@ class AgentWorkflow:
                         state=self._state.to_dict(),
                         parent_workflow_id=input.parent_workflow_id,
                         tool_descriptions=self._tool_descriptions,
+                        context=self._context,
                     )
                 )
 
@@ -654,6 +659,7 @@ class AgentWorkflow:
                 tool_name=tool_name,
                 arguments=arguments,
                 trace_context=self._trace_context.to_dict() if self._trace_context else None,
+                context=self._context,
             ),
             start_to_close_timeout=timedelta(seconds=60),
             retry_policy=RetryPolicy(
@@ -759,6 +765,7 @@ class AgentWorkflow:
                 max_tokens=agent_config.max_tokens,
                 parent_workflow_id=parent_id,
                 parent_trace_context=self._trace_context.to_dict() if self._trace_context else None,
+                context=self._context,
             ),
             id=conversation_id,
         )

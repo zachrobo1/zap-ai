@@ -4,6 +4,10 @@ from typing import Any, Generator
 from unittest.mock import MagicMock
 
 import pytest
+from temporalio.worker.workflow_sandbox import (
+    SandboxedWorkflowRunner,
+    SandboxRestrictions,
+)
 
 from zap_ai import Task, TaskStatus, Zap, ZapAgent
 from zap_ai.activities.inference import InferenceOutput
@@ -167,3 +171,22 @@ def zap_instance(sample_agent: ZapAgent) -> Zap:
 def zap_with_sub_agents(agent_with_sub_agents: list[ZapAgent]) -> Zap:
     """A Zap instance with sub-agent relationships."""
     return Zap(agents=agent_with_sub_agents)
+
+
+@pytest.fixture
+def test_sandbox_runner() -> SandboxedWorkflowRunner:
+    """Create a sandbox runner configured for testing.
+
+    Includes passthrough for:
+    - beartype: Type checking framework with circular imports
+    - fastmcp: MCP framework used in test fixtures
+
+    This fixture eliminates duplication of sandbox runner creation
+    across test files.
+    """
+    return SandboxedWorkflowRunner(
+        restrictions=SandboxRestrictions.default.with_passthrough_modules(
+            "beartype",
+            "fastmcp",
+        )
+    )

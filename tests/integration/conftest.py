@@ -7,6 +7,7 @@ import pytest
 from temporalio import activity
 from temporalio.client import Client
 from temporalio.worker import Worker
+from temporalio.worker.workflow_sandbox import SandboxedWorkflowRunner
 
 from zap_ai.activities import InferenceInput, InferenceOutput, ToolExecutionInput
 from zap_ai.activities.tool_execution import AgentConfigOutput
@@ -86,7 +87,9 @@ async def temporal_client() -> AsyncGenerator[Client, None]:
 
 
 @pytest.fixture
-async def integration_worker(temporal_client: Client) -> AsyncGenerator[Worker, None]:
+async def integration_worker(
+    temporal_client: Client, test_sandbox_runner: SandboxedWorkflowRunner
+) -> AsyncGenerator[Worker, None]:
     """
     Create a worker connected to real Temporal with mock activities.
 
@@ -103,6 +106,7 @@ async def integration_worker(temporal_client: Client) -> AsyncGenerator[Worker, 
             mock_tool_execution_activity,
             mock_get_agent_config_activity,
         ],
+        workflow_runner=test_sandbox_runner,
     )
 
     async with worker:
@@ -123,7 +127,7 @@ mock_inference_activity_with_tools = activity.defn(name="inference_activity")(
 
 @pytest.fixture
 async def integration_worker_with_tools(
-    temporal_client: Client,
+    temporal_client: Client, test_sandbox_runner: SandboxedWorkflowRunner
 ) -> AsyncGenerator[Worker, None]:
     """
     Create a worker that uses the tool-calling mock inference activity.
@@ -141,6 +145,7 @@ async def integration_worker_with_tools(
             mock_tool_execution_activity,
             mock_get_agent_config_activity,
         ],
+        workflow_runner=test_sandbox_runner,
     )
 
     async with worker:
@@ -195,7 +200,7 @@ mock_inference_activity_with_approval = activity.defn(name="inference_activity")
 
 @pytest.fixture
 async def integration_worker_with_approval(
-    temporal_client: Client,
+    temporal_client: Client, test_sandbox_runner: SandboxedWorkflowRunner
 ) -> AsyncGenerator[Worker, None]:
     """
     Create a worker that uses the approval-triggering mock inference activity.
@@ -214,6 +219,7 @@ async def integration_worker_with_approval(
             mock_tool_execution_activity,
             mock_get_agent_config_activity,
         ],
+        workflow_runner=test_sandbox_runner,
     )
 
     async with worker:
@@ -302,7 +308,7 @@ mock_inference_activity_subagent_approval = activity.defn(name="inference_activi
 
 @pytest.fixture
 async def integration_worker_subagent_approval(
-    temporal_client: Client,
+    temporal_client: Client, test_sandbox_runner: SandboxedWorkflowRunner
 ) -> AsyncGenerator[Worker, None]:
     """
     Create a worker for sub-agent + approval testing.
@@ -320,6 +326,7 @@ async def integration_worker_subagent_approval(
             mock_tool_execution_activity,
             mock_get_agent_config_activity,
         ],
+        workflow_runner=test_sandbox_runner,
     )
 
     async with worker:

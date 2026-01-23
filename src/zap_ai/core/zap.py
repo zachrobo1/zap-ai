@@ -266,6 +266,44 @@ class Zap(Generic[TContext]):
         """
         return self._tool_registry
 
+    def _serialize_context_with_metadata(self, context: Any) -> dict[str, Any]:
+        """
+        Serialize context with type metadata for reconstruction.
+
+        Automatically handles:
+        - Pydantic models (via model_dump)
+        - Dataclasses (via __dict__)
+        - Plain dicts (passthrough)
+
+        Returns dict with __zap_context_type__ metadata for non-dict types.
+        """
+        if context is None:
+            return {}
+
+        # Plain dict - no metadata needed
+        if isinstance(context, dict):
+            return context
+
+        # Determine type info
+        context_type = type(context)
+        type_id = f"{context_type.__module__}.{context_type.__qualname__}"
+
+        # Serialize data
+        if hasattr(context, "model_dump"):  # Pydantic model
+            data = context.model_dump()
+        elif hasattr(context, "__dataclass_fields__"):  # Dataclass
+            from dataclasses import asdict
+
+            data = asdict(context)
+        else:
+            raise ValueError(f"Cannot serialize context of type {type(context)}")
+
+        # Add metadata (inline)
+        data["__zap_context_type__"] = type_id
+        data["__zap_context_version__"] = "1"
+
+        return data
+
     async def execute_task(
         self,
         agent_name: str | None = None,
@@ -290,9 +328,11 @@ class Zap(Generic[TContext]):
                 takes precedence over `task`. Use this for vision tasks.
             follow_up_on_task: If provided, sends the task as a follow-up
                 message to an existing task instead of starting a new one.
-            context: Optional context to pass to agents with dynamic prompts.
-                Defaults to {} if not provided. Note: agents with callable
-                prompts should be given appropriate context.
+            context: Optional context to pass to agents with dynamic prompts
+                and MCP tools. For dynamic prompts, this is used to resolve
+                the prompt at runtime. For MCP tools, this is passed via the
+                `meta` parameter and can be accessed using `CurrentZapContext()`.
+                Defaults to {} if not provided.
             approval_rules: Optional rules for human-in-the-loop approval.
                 When provided, tool calls matching the patterns will pause
                 for human approval before execution.
@@ -407,6 +447,11 @@ class Zap(Generic[TContext]):
         # Resolve the prompt with context
         resolved_prompt = agent.resolve_prompt(effective_context)
 
+        # Serialize context for MCP tools
+        serialized_context: dict[str, Any] | None = None
+        if context is not None:
+            serialized_context = self._serialize_context_with_metadata(context)
+
         # Generate task ID
         task_id = f"{agent_name}-{uuid4().hex[:12]}"
 
@@ -449,6 +494,7 @@ class Zap(Generic[TContext]):
                 max_tokens=agent.max_tokens,
                 approval_rules=approval_rules.to_dict() if approval_rules else None,
                 tool_descriptions=tool_descriptions,
+                context=serialized_context,
             ),
             id=task_id,
             task_queue=self.task_queue,

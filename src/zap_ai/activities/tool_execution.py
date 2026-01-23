@@ -58,12 +58,14 @@ class ToolExecutionInput:
         tool_name: Name of the MCP tool to execute.
         arguments: Arguments to pass to the tool.
         trace_context: Optional trace context for observability.
+        context: Optional ZapContext data to pass to tools via meta.
     """
 
     agent_name: str
     tool_name: str
     arguments: dict[str, Any] = field(default_factory=dict)
     trace_context: dict[str, Any] | None = None
+    context: dict[str, Any] | None = None
 
 
 # Global reference to tool registry (set during worker initialization)
@@ -139,9 +141,14 @@ async def tool_execution_activity(input: ToolExecutionInput) -> str:
             f"Tool '{input.tool_name}' not found for agent '{input.agent_name}': {e}"
         ) from e
 
+    # Build meta dict with zap_context if provided
+    meta = None
+    if input.context:
+        meta = {"zap_context": input.context}
+
     # Execute the tool via FastMCP client
     async def _execute_tool() -> str:
-        result = await client.call_tool(input.tool_name, input.arguments)
+        result = await client.call_tool(input.tool_name, input.arguments, meta=meta)
 
         activity.logger.info(f"Tool '{input.tool_name}' executed successfully")
 

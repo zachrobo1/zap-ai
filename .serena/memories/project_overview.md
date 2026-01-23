@@ -15,6 +15,7 @@ Zap is an opinionated library for building **resilient AI agents** on top of Tem
 - **Observability** - built-in tracing support with Langfuse integration (extensible via BaseTracingProvider ABC)
 - **MCP sampling support** - Handle LLM requests from MCP servers via `LiteLLMSamplingHandler` (import from `zap_ai.mcp.sampling`)
 - **Dynamic prompts** - context-aware prompts resolved at runtime
+- **Context injection to MCP tools** - pass context (user_id, tenant, etc.) to tools via dependency injection, hidden from LLM, with full type safety
 - **Conversation history API** - rich access to turns, tool calls, and text content
 - **Multimodal/Vision support** - send images to vision-capable models with automatic capability validation
 - **Streaming support** - async generator API for real-time event streaming during task execution
@@ -38,7 +39,7 @@ Zap is an opinionated library for building **resilient AI agents** on top of Tem
 ## Package Structure
 ```
 src/zap_ai/
-├── __init__.py         # Public API exports (Zap, ZapAgent, Task, TaskStatus, ApprovalRules)
+├── __init__.py         # Public API exports (Zap, ZapAgent, Task, TaskStatus, ApprovalRules, ZapContext, ZapContextValue, TypedZapContext)
 ├── exceptions.py       # All custom exceptions (consolidated, all inherit from ZapError)
 ├── utils.py            # Shared utility functions (e.g., parse_tool_arguments)
 ├── core/               # Core models (Zap, ZapAgent, Task)
@@ -68,6 +69,7 @@ src/zap_ai/
 ├── mcp/                # MCP client management and tool registry
 │   ├── __init__.py
 │   ├── client_manager.py # FastMCP client lifecycle
+│   ├── context.py        # ZapContext dependency injection helpers (import: `from zap_ai.mcp.context import ZapContext, ZapContextValue, TypedZapContext`)
 │   ├── sampling.py       # MCP sampling handlers - import directly: `from zap_ai.mcp.sampling import create_mcp_client, LiteLLMSamplingHandler`
 │   ├── schema_converter.py # MCP to LiteLLM schema conversion
 │   └── tool_registry.py # Tool discovery and caching (get_tools_for_agent)
@@ -81,8 +83,9 @@ src/zap_ai/
 │   ├── noop_provider.py # No-op fallback
 │   └── langfuse_provider.py # Langfuse implementation
 └── worker/             # Worker process for running workflows
-    ├── __init__.py
+    ├── __init__.py     # Public API (create_worker, run_worker, run_worker_with_zap, create_production_runner, production_restrictions)
     ├── worker.py       # Worker creation functions (run_worker)
+    ├── sandbox.py      # Temporal sandbox configuration (factory functions, restrictions)
     └── __main__.py     # CLI entry point (python -m zap_ai.worker)
 ```
 
@@ -150,10 +153,64 @@ All exceptions inherit from `ZapError`:
 8. `continue-as-new` prevents event history from growing unbounded
 9. `stream_task()` polls workflow via Temporal query to yield events in real-time
 
+## Context Injection
+
+Context passed to `execute_task()` serves two purposes:
+1. **Dynamic prompts** - Resolve `prompt=lambda ctx: f"..."` at runtime
+2. **MCP tool injection** - Pass context to tools via FastMCP's dependency injection
+
+**Accessing context in MCP tools (Dependency Injection - ONLY APPROACH):**
+```python
+from fastmcp import FastMCP
+from fastmcp.dependencies import Depends
+from zap_ai.mcp.context import ZapContext, ZapContextValue, TypedZapContext
+
+mcp = FastMCP("MyService")
+
+# Option 1: Full dict context
+@mcp.tool()
+async def my_tool(query: str, zap_ctx: dict = Depends(ZapContext)) -> str:
+    user_id = zap_ctx.get("user_id")
+    ...
+
+# Option 2: Extract specific values
+UserId = ZapContextValue("user_id")
+Tenant = ZapContextValue("tenant", "default")
+
+@mcp.tool()
+async def tenant_search(
+    query: str,
+    user_id: str | None = Depends(UserId),
+    tenant: str = Depends(Tenant)
+) -> str:
+    ...
+
+# Option 3: Typed context (Pydantic/dataclass)
+from dataclasses import dataclass
+
+@dataclass
+class UserSession:
+    user_id: str
+    tenant: str
+
+CurrentSession = TypedZapContext(UserSession)
+
+@mcp.tool()
+async def get_orders(
+    limit: int = 10,
+    session: UserSession = Depends(CurrentSession)
+) -> str:
+    # Full type safety and IDE autocomplete!
+    orders = await db.query(user_id=session.user_id)
+    ...
+```
+
+The context dependencies are hidden from the LLM schema - it only sees the regular tool parameters.
+
 ## Zap Methods
 - `start()` - Connect to Temporal, initialize MCP clients
 - `stop()` - Graceful shutdown
-- `execute_task()` - Start a task and return Task object
+- `execute_task(agent_name, task, context=None)` - Start a task; context is used for dynamic prompts AND injected to MCP tools
 - `stream_task()` - Execute task and stream events via async generator
 - `get_task()` - Retrieve task by ID
 - `get_agent()` - Get agent configuration
