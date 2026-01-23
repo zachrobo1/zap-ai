@@ -55,33 +55,34 @@ class TestZapContextDependency:
         assert isinstance(result, dict)
         assert result == {"user_id": "user_123", "tenant": "acme"}
 
-    def test_returns_empty_dict_when_no_context(self) -> None:
-        """Should return empty dict when no context exists."""
-        ctx = _create_mock_context(None)
-
+    @pytest.mark.parametrize(
+        "ctx_setup,description",
+        [
+            (lambda: _create_mock_context(None), "no context"),
+            (
+                lambda: (
+                    ctx := MagicMock(spec=Context),
+                    setattr(ctx, "request_context", None),
+                    ctx,
+                )[2],
+                "no request_context",
+            ),
+            (
+                lambda: (
+                    ctx := MagicMock(spec=Context),
+                    setattr(ctx.request_context, "meta", (meta := MagicMock(spec=[]))),
+                    delattr(meta, "zap_context"),
+                    ctx,
+                )[3],
+                "no zap_context attribute",
+            ),
+        ],
+        ids=["no_context", "no_request_context", "no_zap_context_attribute"],
+    )
+    def test_returns_empty_dict_for_missing_context(self, ctx_setup, description) -> None:
+        """Should return empty dict when context is missing or incomplete."""
+        ctx = ctx_setup()
         result = ZapContext(ctx)
-
-        assert result == {}
-
-    def test_returns_empty_dict_when_no_request_context(self) -> None:
-        """Should return empty dict when request_context is None."""
-        ctx = MagicMock(spec=Context)
-        ctx.request_context = None
-
-        result = ZapContext(ctx)
-
-        assert result == {}
-
-    def test_returns_empty_dict_when_no_zap_context_attribute(self) -> None:
-        """Should return empty dict when zap_context attribute is missing."""
-        ctx = MagicMock(spec=Context)
-        # Create meta without zap_context attribute
-        meta = MagicMock(spec=[])  # Empty spec means no attributes
-        del meta.zap_context  # Ensure attribute doesn't exist
-        ctx.request_context.meta = meta
-
-        result = ZapContext(ctx)
-
         assert result == {}
 
     def test_handles_complex_context(self) -> None:
@@ -100,41 +101,46 @@ class TestZapContextDependency:
         assert result["permissions"] == ["read", "write"]
         assert result["metadata"] == {"source": "api", "version": "2.0"}
 
-    def test_deserializes_typed_context_with_metadata(self) -> None:
+    @pytest.mark.parametrize(
+        "fixture_class,type_path,context_data",
+        [
+            (
+                PydanticContextFixture,
+                "tests.unit.mcp.test_context.PydanticContextFixture",
+                {
+                    "session_id": "session_123",
+                    "user_name": "Alice",
+                    "authenticated": True,
+                },
+            ),
+            (
+                DataclassContextFixture,
+                "tests.unit.mcp.test_context.DataclassContextFixture",
+                {
+                    "user_id": "user_456",
+                    "tenant": "acme_corp",
+                    "permissions": ["read", "write"],
+                },
+            ),
+        ],
+        ids=["pydantic", "dataclass"],
+    )
+    def test_deserializes_typed_context_with_metadata(
+        self, fixture_class, type_path, context_data
+    ) -> None:
         """Should deserialize typed context when metadata is present."""
         ctx = MagicMock(spec=Context)
         ctx.request_context.meta.zap_context = {
-            "__zap_context_type__": "tests.unit.mcp.test_context.PydanticContextFixture",
+            "__zap_context_type__": type_path,
             "__zap_context_version__": "1",
-            "session_id": "session_123",
-            "user_name": "Alice",
-            "authenticated": True,
+            **context_data,
         }
 
         result = ZapContext(ctx)
 
-        assert isinstance(result, PydanticContextFixture)
-        assert result.session_id == "session_123"
-        assert result.user_name == "Alice"
-        assert result.authenticated is True
-
-    def test_deserializes_dataclass_context_with_metadata(self) -> None:
-        """Should deserialize dataclass context when metadata is present."""
-        ctx = MagicMock(spec=Context)
-        ctx.request_context.meta.zap_context = {
-            "__zap_context_type__": "tests.unit.mcp.test_context.DataclassContextFixture",
-            "__zap_context_version__": "1",
-            "user_id": "user_456",
-            "tenant": "acme_corp",
-            "permissions": ["read", "write"],
-        }
-
-        result = ZapContext(ctx)
-
-        assert isinstance(result, DataclassContextFixture)
-        assert result.user_id == "user_456"
-        assert result.tenant == "acme_corp"
-        assert result.permissions == ["read", "write"]
+        assert isinstance(result, fixture_class)
+        for key, value in context_data.items():
+            assert getattr(result, key) == value
 
     def test_returns_dict_when_type_cannot_be_imported(self) -> None:
         """Should return dict with warning when type can't be imported."""
@@ -151,9 +157,8 @@ class TestZapContextDependency:
         assert isinstance(result, dict)
         assert result == {"data": "value"}
 
-    def test_works_without_explicit_ctx_parameter(self) -> None:
-        """Should work with default CurrentContext() when no ctx provided."""
-        # This tests that the function signature is correct for dependency injection
+    def test_has_correct_dependency_signature(self) -> None:
+        """Should have correct signature for dependency injection."""
         import inspect
 
         sig = inspect.signature(ZapContext)
@@ -176,24 +181,6 @@ class TestZapContextValueDependency:
 
         assert result == "user_123"
 
-    def test_returns_default_for_missing_key(self) -> None:
-        """Should return default when key doesn't exist."""
-        ctx = _create_mock_context({"user_id": "user_123"})
-
-        get_tenant = ZapContextValue("tenant", "default_tenant")
-        result = get_tenant(ctx)
-
-        assert result == "default_tenant"
-
-    def test_returns_none_as_default(self) -> None:
-        """Should return None when no default specified."""
-        ctx = _create_mock_context({"user_id": "user_123"})
-
-        get_missing = ZapContextValue("missing_key")
-        result = get_missing(ctx)
-
-        assert result is None
-
     def test_creates_reusable_dependency(self) -> None:
         """Should create reusable dependency that can be called multiple times."""
         UserId = ZapContextValue("user_id", "anonymous")
@@ -206,163 +193,151 @@ class TestZapContextValueDependency:
         assert UserId(ctx2) == "user_456"
         assert UserId(ctx3) == "anonymous"
 
-    def test_works_with_different_types(self) -> None:
-        """Should work with different value types."""
-        ctx = _create_mock_context(
-            {
-                "count": 42,
-                "items": ["a", "b", "c"],
-                "config": {"key": "value"},
-                "active": True,
-            }
-        )
+    @pytest.mark.parametrize(
+        "context_data,key,default,expected",
+        [
+            ({"user_id": "user_123"}, "tenant", "default_tenant", "default_tenant"),
+            ({"user_id": "user_123"}, "missing_key", None, None),
+            ({}, "user_id", "default_user", "default_user"),
+            ({"count": 42}, "count", 0, 42),
+            ({"items": ["a", "b"]}, "items", [], ["a", "b"]),
+        ],
+        ids=[
+            "missing_key_with_default",
+            "missing_key_none_default",
+            "no_context_with_default",
+            "actual_value_over_default_int",
+            "actual_value_over_default_list",
+        ],
+    )
+    def test_returns_default_for_missing_keys(self, context_data, key, default, expected) -> None:
+        """Should return default when key doesn't exist or return actual value when present."""
+        ctx = _create_mock_context(context_data)
+        get_value = ZapContextValue(key, default)
+        result = get_value(ctx)
+        assert result == expected
 
-        get_count = ZapContextValue("count", 0)
-        get_items = ZapContextValue("items", [])
-        get_config = ZapContextValue("config", {})
-        get_active = ZapContextValue("active", False)
-
-        assert get_count(ctx) == 42
-        assert get_items(ctx) == ["a", "b", "c"]
-        assert get_config(ctx) == {"key": "value"}
-        assert get_active(ctx) is True
-
-    def test_returns_default_when_no_context(self) -> None:
-        """Should return default when no context exists."""
-        ctx = MagicMock(spec=Context)
-        ctx.request_context = None
-
-        get_user_id = ZapContextValue("user_id", "default_user")
-        result = get_user_id(ctx)
-
-        assert result == "default_user"
-
-    def test_returns_typed_default(self) -> None:
-        """Should work with typed defaults."""
-        ctx = _create_mock_context({})
-
-        # Integer default
-        int_result = ZapContextValue("count", 0)(ctx)
-        assert int_result == 0
-        assert isinstance(int_result, int)
-
-        # List default
-        list_result = ZapContextValue("items", [])(ctx)
-        assert list_result == []
-        assert isinstance(list_result, list)
-
-        # Dict default
-        dict_result = ZapContextValue("config", {})(ctx)
-        assert dict_result == {}
-        assert isinstance(dict_result, dict)
-
-    def test_returns_actual_value_over_default(self) -> None:
-        """Should return actual value even if default is provided."""
-        ctx = _create_mock_context({"count": 42, "items": ["a", "b"]})
-
-        assert ZapContextValue("count", 0)(ctx) == 42
-        assert ZapContextValue("items", [])(ctx) == ["a", "b"]
-
-    def test_dependency_has_correct_signature(self) -> None:
-        """Should have correct signature for dependency injection."""
-        import inspect
-
-        UserId = ZapContextValue("user_id")
-        sig = inspect.signature(UserId)
-        params = list(sig.parameters.values())
-
-        assert len(params) == 1
-        assert params[0].name == "ctx"
-        assert params[0].default is not inspect.Parameter.empty
+    @pytest.mark.parametrize(
+        "context_data,key,default,expected_value,expected_type",
+        [
+            ({"count": 42}, "count", 0, 42, int),
+            ({}, "count", 0, 0, int),
+            ({"items": ["a", "b", "c"]}, "items", [], ["a", "b", "c"], list),
+            ({}, "items", [], [], list),
+            ({"config": {"key": "value"}}, "config", {}, {"key": "value"}, dict),
+            ({}, "config", {}, {}, dict),
+            ({"active": True}, "active", False, True, bool),
+            ({}, "active", False, False, bool),
+        ],
+        ids=[
+            "int_value",
+            "int_default",
+            "list_value",
+            "list_default",
+            "dict_value",
+            "dict_default",
+            "bool_value",
+            "bool_default",
+        ],
+    )
+    def test_works_with_different_types(
+        self, context_data, key, default, expected_value, expected_type
+    ) -> None:
+        """Should work with different value types and typed defaults."""
+        ctx = _create_mock_context(context_data)
+        get_value = ZapContextValue(key, default)
+        result = get_value(ctx)
+        assert result == expected_value
+        assert isinstance(result, expected_type)
 
 
 class TestTypedZapContextDependency:
     """Tests for TypedZapContext dependency factory."""
 
-    def test_deserializes_pydantic_model(self) -> None:
-        """Should deserialize to Pydantic model."""
+    @pytest.mark.parametrize(
+        "fixture_class,type_path,context_data",
+        [
+            (
+                PydanticContextFixture,
+                "tests.unit.mcp.test_context.PydanticContextFixture",
+                {
+                    "session_id": "session_999",
+                    "user_name": "Bob",
+                    "authenticated": False,
+                },
+            ),
+            (
+                DataclassContextFixture,
+                "tests.unit.mcp.test_context.DataclassContextFixture",
+                {
+                    "user_id": "user_789",
+                    "tenant": "acme",
+                    "permissions": ["read", "write", "delete"],
+                },
+            ),
+        ],
+        ids=["pydantic", "dataclass"],
+    )
+    def test_deserializes_typed_models(self, fixture_class, type_path, context_data) -> None:
+        """Should deserialize to Pydantic model or dataclass."""
         ctx = MagicMock(spec=Context)
         ctx.request_context.meta.zap_context = {
-            "__zap_context_type__": "tests.unit.mcp.test_context.PydanticContextFixture",
+            "__zap_context_type__": type_path,
             "__zap_context_version__": "1",
-            "session_id": "session_999",
-            "user_name": "Bob",
-            "authenticated": False,
+            **context_data,
         }
 
-        GetSession = TypedZapContext(PydanticContextFixture)
-        result = GetSession(ctx)
-
-        assert isinstance(result, PydanticContextFixture)
-        assert result.session_id == "session_999"
-        assert result.user_name == "Bob"
-        assert result.authenticated is False
-
-    def test_deserializes_dataclass(self) -> None:
-        """Should deserialize to dataclass."""
-        ctx = MagicMock(spec=Context)
-        ctx.request_context.meta.zap_context = {
-            "__zap_context_type__": "tests.unit.mcp.test_context.DataclassContextFixture",
-            "__zap_context_version__": "1",
-            "user_id": "user_789",
-            "tenant": "acme",
-            "permissions": ["read", "write", "delete"],
-        }
-
-        GetContext = TypedZapContext(DataclassContextFixture)
+        GetContext = TypedZapContext(fixture_class)
         result = GetContext(ctx)
 
-        assert isinstance(result, DataclassContextFixture)
-        assert result.user_id == "user_789"
-        assert result.tenant == "acme"
-        assert result.permissions == ["read", "write", "delete"]
+        assert isinstance(result, fixture_class)
+        for key, value in context_data.items():
+            assert getattr(result, key) == value
 
-    def test_raises_on_type_mismatch(self) -> None:
-        """Should raise TypeError when context type doesn't match expected."""
-        ctx = MagicMock(spec=Context)
-        ctx.request_context.meta.zap_context = {
-            "__zap_context_type__": "tests.unit.mcp.test_context.DataclassContextFixture",
-            "__zap_context_version__": "1",
-            "user_id": "user_123",
-            "tenant": "acme",
-            "permissions": [],
-        }
-
-        GetSession = TypedZapContext(PydanticContextFixture)
-
-        with pytest.raises(TypeError, match="type mismatch"):
-            GetSession(ctx)
-
-    def test_raises_on_missing_type(self) -> None:
-        """Should raise TypeError when type can't be imported."""
-        ctx = MagicMock(spec=Context)
-        ctx.request_context.meta.zap_context = {
-            "__zap_context_type__": "nonexistent.module.FakeContext",
-            "__zap_context_version__": "1",
-            "data": "value",
-        }
-
-        GetContext = TypedZapContext(PydanticContextFixture)
-
-        with pytest.raises(TypeError, match="Could not import context type"):
-            GetContext(ctx)
-
-    def test_raises_when_no_context_provided(self) -> None:
-        """Should raise TypeError when no context is provided."""
-        ctx = _create_mock_context(None)
-
-        GetSession = TypedZapContext(PydanticContextFixture)
-
-        with pytest.raises(TypeError, match="no context was provided"):
-            GetSession(ctx)
-
-    def test_raises_when_context_has_no_type_metadata(self) -> None:
-        """Should raise TypeError when context has no type metadata."""
-        ctx = _create_mock_context({"user_id": "user_123", "tenant": "acme"})
+    @pytest.mark.parametrize(
+        "context_setup,error_match,description",
+        [
+            (
+                lambda: {
+                    "__zap_context_type__": "tests.unit.mcp.test_context.DataclassContextFixture",
+                    "__zap_context_version__": "1",
+                    "user_id": "user_123",
+                    "tenant": "acme",
+                    "permissions": [],
+                },
+                "type mismatch",
+                "type_mismatch",
+            ),
+            (
+                lambda: {
+                    "__zap_context_type__": "nonexistent.module.FakeContext",
+                    "__zap_context_version__": "1",
+                    "data": "value",
+                },
+                "Could not import context type",
+                "missing_type",
+            ),
+            (
+                lambda: None,
+                "no context was provided",
+                "no_context",
+            ),
+            (
+                lambda: {"user_id": "user_123", "tenant": "acme"},
+                "no type metadata",
+                "no_type_metadata",
+            ),
+        ],
+        ids=["type_mismatch", "missing_type", "no_context", "no_type_metadata"],
+    )
+    def test_raises_on_invalid_context(self, context_setup, error_match, description) -> None:
+        """Should raise TypeError for invalid context scenarios."""
+        zap_context = context_setup()
+        ctx = _create_mock_context(zap_context)
 
         GetSession = TypedZapContext(PydanticContextFixture)
 
-        with pytest.raises(TypeError, match="no type metadata"):
+        with pytest.raises(TypeError, match=error_match):
             GetSession(ctx)
 
     def test_creates_reusable_typed_dependency(self) -> None:
@@ -394,15 +369,3 @@ class TestTypedZapContextDependency:
         assert result1.user_name == "Alice"
         assert result2.session_id == "session_2"
         assert result2.user_name == "Bob"
-
-    def test_dependency_has_correct_signature(self) -> None:
-        """Should have correct signature for dependency injection."""
-        import inspect
-
-        GetSession = TypedZapContext(PydanticContextFixture)
-        sig = inspect.signature(GetSession)
-        params = list(sig.parameters.values())
-
-        assert len(params) == 1
-        assert params[0].name == "ctx"
-        assert params[0].default is not inspect.Parameter.empty

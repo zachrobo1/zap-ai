@@ -1,9 +1,9 @@
 """Integration tests for context injection to MCP tools.
 
 These tests verify that:
-1. Context passed via FastMCP's meta parameter is accessible in tools via dependency injection
-2. The ZapContext, ZapContextValue, and TypedZapContext dependencies work correctly
-3. Context flows through the full Zap workflow to MCP tools
+1. Context flows through the full Zap workflow to MCP tools
+2. Different context types (dict, dataclass, Pydantic) are properly serialized
+3. Real MCP servers can access context via dependency injection
 """
 
 import asyncio
@@ -33,256 +33,6 @@ from zap_ai.mcp.context import (
     ZapContextValue,
 )
 from zap_ai.workflows import AgentWorkflow
-
-# =============================================================================
-# FastMCP Server Tests - Direct context injection via meta parameter
-# =============================================================================
-
-
-class TestFastMCPContextInjection:
-    """Test context injection directly through FastMCP client/server."""
-
-    @pytest.mark.asyncio
-    async def test_context_accessible_via_zap_context_dependency(self) -> None:
-        """Test that context passed via meta is accessible in tool via ZapContext dependency."""
-        from fastmcp.dependencies import Depends
-
-        # Create a FastMCP server with a tool that returns the context
-        mcp = FastMCP("ContextTestServer")
-
-        @mcp.tool()
-        async def echo_context(zap_ctx: dict = Depends(ZapContext)) -> str:
-            """Return the zap context as JSON."""
-            return json.dumps(zap_ctx)
-
-        # Connect client directly to server (in-memory)
-        client = Client(mcp)
-
-        async with client:
-            result = await client.call_tool(
-                "echo_context",
-                {},
-                meta={"zap_context": {"user_id": "user_123", "tenant": "acme"}},
-            )
-
-        # Parse the result - FastMCP returns CallToolResult with content list
-        assert result.content
-        content = result.content[0].text
-        parsed = json.loads(content)
-
-        assert parsed == {"user_id": "user_123", "tenant": "acme"}
-
-    @pytest.mark.asyncio
-    async def test_zap_context_value_extracts_specific_keys(self) -> None:
-        """Test that ZapContextValue dependency correctly extracts individual values."""
-        from fastmcp.dependencies import Depends
-
-        mcp = FastMCP("ValueTestServer")
-
-        UserId = ZapContextValue("user_id", "anonymous")
-        MissingKey = ZapContextValue("nonexistent", "default_value")
-
-        @mcp.tool()
-        async def get_user_id(user_id: str = Depends(UserId)) -> str:
-            """Return just the user_id from context."""
-            return user_id
-
-        @mcp.tool()
-        async def get_missing_key(missing: str = Depends(MissingKey)) -> str:
-            """Return a key that doesn't exist, with default."""
-            return missing
-
-        client = Client(mcp)
-
-        async with client:
-            # Test getting existing value
-            result = await client.call_tool(
-                "get_user_id",
-                {},
-                meta={"zap_context": {"user_id": "user_456", "tenant": "beta"}},
-            )
-            assert result.content[0].text == "user_456"
-
-            # Test getting missing value returns default
-            result = await client.call_tool(
-                "get_missing_key",
-                {},
-                meta={"zap_context": {"user_id": "user_456"}},
-            )
-            assert result.content[0].text == "default_value"
-
-    @pytest.mark.asyncio
-    async def test_context_empty_when_no_meta_provided(self) -> None:
-        """Test that context is empty dict when no meta parameter is passed."""
-        from fastmcp.dependencies import Depends
-
-        mcp = FastMCP("EmptyContextServer")
-
-        @mcp.tool()
-        async def check_context(zap_ctx: dict = Depends(ZapContext)) -> str:
-            """Return whether context is empty."""
-            return "empty" if zap_ctx == {} else f"has_data: {json.dumps(zap_ctx)}"
-
-        client = Client(mcp)
-
-        async with client:
-            # Call without meta parameter
-            result = await client.call_tool("check_context", {})
-            assert result.content[0].text == "empty"
-
-    @pytest.mark.asyncio
-    async def test_complex_nested_context(self) -> None:
-        """Test that complex nested context structures are preserved."""
-        from fastmcp.dependencies import Depends
-
-        mcp = FastMCP("NestedContextServer")
-
-        @mcp.tool()
-        async def echo_context(zap_ctx: dict = Depends(ZapContext)) -> str:
-            """Return the full context."""
-            return json.dumps(zap_ctx)
-
-        client = Client(mcp)
-
-        complex_context = {
-            "user_id": "user_789",
-            "permissions": ["read", "write", "admin"],
-            "metadata": {
-                "source": "api",
-                "version": "2.0",
-                "features": {"dark_mode": True, "notifications": False},
-            },
-            "tags": ["premium", "beta-tester"],
-        }
-
-        async with client:
-            result = await client.call_tool(
-                "echo_context",
-                {},
-                meta={"zap_context": complex_context},
-            )
-
-        parsed = json.loads(result.content[0].text)
-        assert parsed == complex_context
-        assert parsed["permissions"] == ["read", "write", "admin"]
-        assert parsed["metadata"]["features"]["dark_mode"] is True
-
-    @pytest.mark.asyncio
-    async def test_context_with_tool_arguments(self) -> None:
-        """Test that context works alongside regular tool arguments."""
-        from fastmcp.dependencies import Depends
-
-        mcp = FastMCP("MixedServer")
-
-        Tenant = ZapContextValue("tenant", "default")
-
-        @mcp.tool()
-        async def search_for_user(
-            query: str,
-            limit: int = 10,
-            tenant: str = Depends(Tenant),
-        ) -> str:
-            """Search scoped to the current tenant."""
-            return json.dumps(
-                {
-                    "query": query,
-                    "limit": limit,
-                    "tenant_scope": tenant,
-                }
-            )
-
-        client = Client(mcp)
-
-        async with client:
-            result = await client.call_tool(
-                "search_for_user",
-                {"query": "john", "limit": 5},
-                meta={"zap_context": {"tenant": "acme_corp", "user_id": "admin"}},
-            )
-
-        parsed = json.loads(result.content[0].text)
-        assert parsed["query"] == "john"
-        assert parsed["limit"] == 5
-        assert parsed["tenant_scope"] == "acme_corp"
-
-    @pytest.mark.asyncio
-    async def test_dependency_injection_with_zap_context(self) -> None:
-        """Test using ZapContext dependency injection helper."""
-        from fastmcp.dependencies import Depends
-
-        mcp = FastMCP("DependencyInjectionServer")
-
-        @mcp.tool()
-        async def get_user_details(
-            zap_ctx: dict = Depends(ZapContext),
-        ) -> str:
-            """Get user details using dependency injection."""
-            return json.dumps(
-                {
-                    "user_id": zap_ctx.get("user_id"),
-                    "tenant": zap_ctx.get("tenant"),
-                    "context_present": bool(zap_ctx),
-                }
-            )
-
-        client = Client(mcp)
-
-        async with client:
-            result = await client.call_tool(
-                "get_user_details",
-                {},
-                meta={"zap_context": {"user_id": "user_999", "tenant": "test_corp"}},
-            )
-
-        parsed = json.loads(result.content[0].text)
-        assert parsed["user_id"] == "user_999"
-        assert parsed["tenant"] == "test_corp"
-        assert parsed["context_present"] is True
-
-    @pytest.mark.asyncio
-    async def test_dependency_injection_with_zap_context_value(self) -> None:
-        """Test using ZapContextValue dependency factory."""
-        from fastmcp.dependencies import Depends
-
-        mcp = FastMCP("ValueDependencyServer")
-
-        # Create reusable dependencies
-        UserId = ZapContextValue("user_id")
-        Tenant = ZapContextValue("tenant", "default")
-
-        @mcp.tool()
-        async def check_permissions(
-            user_id: str | None = Depends(UserId),
-            tenant: str = Depends(Tenant),
-        ) -> str:
-            """Check permissions using injected context values."""
-            if not user_id:
-                return "No user authenticated"
-            return json.dumps({"user": user_id, "tenant": tenant, "has_access": True})
-
-        client = Client(mcp)
-
-        async with client:
-            # Test with full context
-            result = await client.call_tool(
-                "check_permissions",
-                {},
-                meta={"zap_context": {"user_id": "user_777", "tenant": "enterprise"}},
-            )
-            parsed = json.loads(result.content[0].text)
-            assert parsed["user"] == "user_777"
-            assert parsed["tenant"] == "enterprise"
-
-            # Test with partial context (missing tenant, should use default)
-            result = await client.call_tool(
-                "check_permissions",
-                {},
-                meta={"zap_context": {"user_id": "user_888"}},
-            )
-            parsed = json.loads(result.content[0].text)
-            assert parsed["user"] == "user_888"
-            assert parsed["tenant"] == "default"
-
 
 # =============================================================================
 # Workflow Integration Tests - Context flows through Temporal workflow
@@ -446,27 +196,84 @@ class TestWorkflowContextInjection:
         finally:
             await zap.stop()
 
+    @pytest.mark.parametrize(
+        "context_class,context_data,expected_fields",
+        [
+            (
+                "dataclass",
+                {
+                    "user_id": "user_456",
+                    "tenant": "beta_corp",
+                    "permissions": ["read", "write"],
+                },
+                {
+                    "user_id": "user_456",
+                    "tenant": "beta_corp",
+                    "permissions": ["read", "write"],
+                    "__zap_context_version__": "1",
+                },
+            ),
+            (
+                "pydantic",
+                {
+                    "session_id": "sess_789",
+                    "user_name": "Charlie",
+                    "authenticated": True,
+                    "metadata": {"source": "web", "version": "2.0"},
+                },
+                {
+                    "session_id": "sess_789",
+                    "user_name": "Charlie",
+                    "authenticated": True,
+                    "metadata": {"source": "web", "version": "2.0"},
+                    "__zap_context_version__": "1",
+                },
+            ),
+        ],
+        ids=["dataclass", "pydantic"],
+    )
     @pytest.mark.asyncio
-    async def test_dataclass_context_serialized_through_workflow(
+    async def test_typed_context_serialized_through_workflow(
         self,
         temporal_client: TemporalClient,
         context_workflow_worker: Worker,
         context_workflow_task_queue: str,
+        context_class: str,
+        context_data: dict,
+        expected_fields: dict,
     ) -> None:
-        """Test that dataclass context is serialized and passes through workflow."""
+        """Test that dataclass and Pydantic contexts are serialized through workflow."""
+        if context_class == "dataclass":
 
-        @dataclass
-        class UserContext:
-            user_id: str
-            tenant: str
-            permissions: list[str]
+            @dataclass
+            class UserContext:
+                user_id: str
+                tenant: str
+                permissions: list[str]
 
-        agent = ZapAgent[UserContext](
-            name="DataclassContextAgent",
-            prompt="You are a helpful assistant.",
-        )
+            context_instance = UserContext(**context_data)
+            agent = ZapAgent[UserContext](
+                name="DataclassContextAgent",
+                prompt="You are a helpful assistant.",
+            )
+            context_type_suffix = "UserContext"
 
-        zap: Zap[UserContext] = Zap(
+        else:  # pydantic
+
+            class SessionContext(BaseModel):
+                session_id: str
+                user_name: str
+                authenticated: bool
+                metadata: dict[str, str]
+
+            context_instance = SessionContext(**context_data)
+            agent = ZapAgent[SessionContext](
+                name="PydanticContextAgent",
+                prompt="You are a helpful assistant.",
+            )
+            context_type_suffix = "SessionContext"
+
+        zap = Zap(
             agents=[agent],
             temporal_client=temporal_client,
             task_queue=context_workflow_task_queue,
@@ -474,16 +281,10 @@ class TestWorkflowContextInjection:
         await zap.start()
 
         try:
-            context = UserContext(
-                user_id="user_456",
-                tenant="beta_corp",
-                permissions=["read", "write"],
-            )
-
             task = await zap.execute_task(
-                agent_name="DataclassContextAgent",
+                agent_name=agent.name,
                 task="Get my user info",
-                context=context,
+                context=context_instance,
             )
 
             result = await zap.get_task(task.id)
@@ -496,78 +297,13 @@ class TestWorkflowContextInjection:
             # Verify serialized context includes type metadata
             assert "default" in _captured_workflow_contexts
             captured = _captured_workflow_contexts["default"]
-            assert captured["user_id"] == "user_456"
-            assert captured["tenant"] == "beta_corp"
-            assert captured["permissions"] == ["read", "write"]
+
+            for key, value in expected_fields.items():
+                assert captured[key] == value
 
             # Verify type metadata is present for deserialization
             assert "__zap_context_type__" in captured
-            assert captured["__zap_context_type__"].endswith("UserContext")
-            assert captured["__zap_context_version__"] == "1"
-
-        finally:
-            await zap.stop()
-
-    @pytest.mark.asyncio
-    async def test_pydantic_context_serialized_through_workflow(
-        self,
-        temporal_client: TemporalClient,
-        context_workflow_worker: Worker,
-        context_workflow_task_queue: str,
-    ) -> None:
-        """Test that Pydantic model context is serialized via model_dump."""
-
-        class SessionContext(BaseModel):
-            session_id: str
-            user_name: str
-            authenticated: bool
-            metadata: dict[str, str]
-
-        agent = ZapAgent[SessionContext](
-            name="PydanticContextAgent",
-            prompt="You are a helpful assistant.",
-        )
-
-        zap: Zap[SessionContext] = Zap(
-            agents=[agent],
-            temporal_client=temporal_client,
-            task_queue=context_workflow_task_queue,
-        )
-        await zap.start()
-
-        try:
-            context = SessionContext(
-                session_id="sess_789",
-                user_name="Charlie",
-                authenticated=True,
-                metadata={"source": "web", "version": "2.0"},
-            )
-
-            task = await zap.execute_task(
-                agent_name="PydanticContextAgent",
-                task="Get my user info",
-                context=context,
-            )
-
-            result = await zap.get_task(task.id)
-            while not result.status.is_terminal():
-                await asyncio.sleep(0.1)
-                result = await zap.get_task(task.id)
-
-            assert result.result is not None
-
-            # Verify Pydantic context was serialized correctly with type metadata
-            assert "default" in _captured_workflow_contexts
-            captured = _captured_workflow_contexts["default"]
-            assert captured["session_id"] == "sess_789"
-            assert captured["user_name"] == "Charlie"
-            assert captured["authenticated"] is True
-            assert captured["metadata"] == {"source": "web", "version": "2.0"}
-
-            # Verify type metadata is present for deserialization
-            assert "__zap_context_type__" in captured
-            assert captured["__zap_context_type__"].endswith("SessionContext")
-            assert captured["__zap_context_version__"] == "1"
+            assert captured["__zap_context_type__"].endswith(context_type_suffix)
 
         finally:
             await zap.stop()
@@ -846,6 +582,138 @@ class TestRealMCPContextInjection:
                 assert captured_typed_context.roles == ["admin", "viewer"]
                 assert captured_typed_context.preferences["dark_mode"] is True
                 assert captured_typed_context.preferences["beta_features"] is False
+
+        finally:
+            await zap.stop()
+
+    @pytest.mark.asyncio
+    async def test_context_value_extraction_through_real_mcp(
+        self,
+        temporal_client: TemporalClient,
+        test_sandbox_runner: SandboxedWorkflowRunner,
+    ) -> None:
+        """Test ZapContextValue extracts values correctly through real MCP server."""
+        from fastmcp.dependencies import Depends
+
+        # Create a FastMCP server with tools that use ZapContextValue
+        mcp = FastMCP("ValueExtractionServer")
+
+        # Store to capture extracted values
+        captured_values: dict[str, Any] = {}
+
+        # Create value extraction dependencies
+        UserId = ZapContextValue("user_id", "anonymous")
+        Tenant = ZapContextValue("tenant", "default_tenant")
+        MissingKey = ZapContextValue("nonexistent_key", "default_value")
+
+        @mcp.tool()
+        async def get_user_details(
+            user_id: str = Depends(UserId),
+            tenant: str = Depends(Tenant),
+            missing: str = Depends(MissingKey),
+        ) -> str:
+            """Extract individual context values."""
+            nonlocal captured_values
+            captured_values["user_id"] = user_id
+            captured_values["tenant"] = tenant
+            captured_values["missing"] = missing
+            return json.dumps({"user_id": user_id, "tenant": tenant, "missing": missing})
+
+        # Create agent with the real MCP server (using plain dict context)
+        mcp_client = Client(mcp)
+        agent = ZapAgent(
+            name="ValueExtractionAgent",
+            prompt="You help extract context values.",
+            mcp_clients=[mcp_client],
+        )
+
+        # Create Zap instance
+        task_queue = f"integration-value-extract-{uuid.uuid4().hex[:8]}"
+        zap = Zap(
+            agents=[agent],
+            temporal_client=temporal_client,
+            task_queue=task_queue,
+        )
+
+        # Mock inference to call our test tool
+        async def mock_inference(input: InferenceInput) -> InferenceOutput:
+            has_tool_result = any(m.get("role") == "tool" for m in input.messages)
+            if has_tool_result:
+                return InferenceOutput(
+                    content="Value extraction complete.",
+                    tool_calls=[],
+                    finish_reason="stop",
+                )
+            return InferenceOutput(
+                content=None,
+                tool_calls=[
+                    {
+                        "id": "call_get_details",
+                        "type": "function",
+                        "function": {
+                            "name": "get_user_details",
+                            "arguments": "{}",
+                        },
+                    }
+                ],
+                finish_reason="tool_calls",
+            )
+
+        mock_inference_activity = activity.defn(name="inference_activity")(mock_inference)
+
+        # Start Zap to initialize tool registry
+        await zap.start()
+
+        try:
+            from zap_ai.activities.tool_execution import (
+                get_agent_config_activity,
+                set_tool_registry,
+                tool_execution_activity,
+            )
+
+            set_tool_registry(zap._tool_registry)
+
+            worker = Worker(
+                temporal_client,
+                task_queue=task_queue,
+                workflows=[AgentWorkflow],
+                activities=[
+                    mock_inference_activity,
+                    tool_execution_activity,
+                    get_agent_config_activity,
+                ],
+                workflow_runner=test_sandbox_runner,
+            )
+
+            async with worker:
+                # Execute task with plain dict context (no type metadata)
+                context = {
+                    "user_id": "extract_user_123",
+                    "tenant": "extract_tenant",
+                    "extra_field": "not_extracted",
+                }
+
+                task = await zap.execute_task(
+                    agent_name="ValueExtractionAgent",
+                    task="Get my user details",
+                    context=context,
+                )
+
+                # Wait for completion
+                result = await zap.get_task(task.id)
+                while not result.status.is_terminal():
+                    await asyncio.sleep(0.1)
+                    result = await zap.get_task(task.id)
+
+                # Verify the task completed successfully
+                assert result.result is not None
+                assert "Value extraction complete" in result.result
+
+                # Verify values were extracted correctly
+                assert captured_values["user_id"] == "extract_user_123"
+                assert captured_values["tenant"] == "extract_tenant"
+                # Missing key should return the default value
+                assert captured_values["missing"] == "default_value"
 
         finally:
             await zap.stop()

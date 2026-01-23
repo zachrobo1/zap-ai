@@ -149,13 +149,13 @@ def ZapContext(ctx: Context = CurrentContext()) -> dict[str, Any]:
             return context_class(**data)
         else:
             warnings.warn(
-                f"Context type '{type_id}' does not support deserialization. " "Returning dict."
+                f"Context type '{type_id}' does not support deserialization. Returning dict."
             )
             return data
 
     except (ImportError, AttributeError, ValueError) as e:
         # Type not found - log warning and return dict
-        warnings.warn(f"Could not import context type '{type_id}': {e}. " "Returning dict.")
+        warnings.warn(f"Could not import context type '{type_id}': {e}. Returning dict.")
         return data
 
 
