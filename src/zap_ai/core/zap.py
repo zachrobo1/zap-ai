@@ -266,6 +266,44 @@ class Zap(Generic[TContext]):
         """
         return self._tool_registry
 
+    def _serialize_context_with_metadata(self, context: Any) -> dict[str, Any]:
+        """
+        Serialize context with type metadata for reconstruction.
+
+        Automatically handles:
+        - Pydantic models (via model_dump)
+        - Dataclasses (via __dict__)
+        - Plain dicts (passthrough)
+
+        Returns dict with __zap_context_type__ metadata for non-dict types.
+        """
+        if context is None:
+            return {}
+
+        # Plain dict - no metadata needed
+        if isinstance(context, dict):
+            return context
+
+        # Determine type info
+        context_type = type(context)
+        type_id = f"{context_type.__module__}.{context_type.__qualname__}"
+
+        # Serialize data
+        if hasattr(context, "model_dump"):  # Pydantic model
+            data = context.model_dump()
+        elif hasattr(context, "__dataclass_fields__"):  # Dataclass
+            from dataclasses import asdict
+
+            data = asdict(context)
+        else:
+            raise ValueError(f"Cannot serialize context of type {type(context)}")
+
+        # Add metadata (inline)
+        data["__zap_context_type__"] = type_id
+        data["__zap_context_version__"] = "1"
+
+        return data
+
     async def execute_task(
         self,
         agent_name: str | None = None,
@@ -412,14 +450,7 @@ class Zap(Generic[TContext]):
         # Serialize context for MCP tools
         serialized_context: dict[str, Any] | None = None
         if context is not None:
-            if isinstance(context, dict):
-                serialized_context = context
-            elif hasattr(context, "model_dump"):  # Pydantic model
-                serialized_context = context.model_dump()
-            elif hasattr(context, "__dict__"):
-                serialized_context = context.__dict__
-            else:
-                raise ValueError(f"Cannot serialize context of type {type(context)}")
+            serialized_context = self._serialize_context_with_metadata(context)
 
         # Generate task ID
         task_id = f"{agent_name}-{uuid4().hex[:12]}"

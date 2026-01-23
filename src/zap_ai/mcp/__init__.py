@@ -17,6 +17,11 @@ from zap_ai.mcp.client_manager import (
     ConnectedClient,
     ToolNotFoundError,
 )
+from zap_ai.mcp.context import (
+    TypedZapContext,
+    ZapContext,
+    ZapContextValue,
+)
 from zap_ai.mcp.schema_converter import (
     SchemaConversionError,
     create_message_agent_tool,
@@ -43,7 +48,11 @@ __all__ = [
     "ClientConnectionError",
     "ToolNotFoundError",
     "SchemaConversionError",
-    # Functions
+    # Context dependency injection helpers
+    "ZapContext",
+    "ZapContextValue",
+    "TypedZapContext",
+    # Schema converter functions
     "mcp_tool_to_litellm",
     "mcp_tools_to_litellm",
     "create_message_agent_tool",
