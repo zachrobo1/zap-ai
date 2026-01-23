@@ -6,7 +6,6 @@ from temporalio.testing import WorkflowEnvironment
 from temporalio.worker import Worker
 from temporalio.worker.workflow_sandbox import (
     SandboxedWorkflowRunner,
-    SandboxRestrictions,
 )
 
 from zap_ai.activities import (
@@ -16,16 +15,6 @@ from zap_ai.activities import (
 )
 from zap_ai.activities.tool_execution import AgentConfigOutput
 from zap_ai.workflows import AgentWorkflow, AgentWorkflowInput
-
-
-def _create_sandbox_runner() -> SandboxedWorkflowRunner:
-    """Create a sandbox runner with passthrough modules for beartype/fastmcp."""
-    return SandboxedWorkflowRunner(
-        restrictions=SandboxRestrictions.default.with_passthrough_modules(
-            "beartype",
-            "fastmcp",
-        )
-    )
 
 
 # Mock activities for testing
@@ -79,7 +68,10 @@ class TestAgentWorkflowBasic:
 
     @pytest.mark.asyncio
     async def test_workflow_starts_and_completes(
-        self, workflow_env: WorkflowEnvironment, simple_input: AgentWorkflowInput
+        self,
+        workflow_env: WorkflowEnvironment,
+        simple_input: AgentWorkflowInput,
+        test_sandbox_runner: SandboxedWorkflowRunner,
     ) -> None:
         """Test that workflow starts and completes with mock activities."""
         async with Worker(
@@ -91,7 +83,7 @@ class TestAgentWorkflowBasic:
                 mock_tool_execution_activity,
                 mock_get_agent_config_activity,
             ],
-            workflow_runner=_create_sandbox_runner(),
+            workflow_runner=test_sandbox_runner,
         ):
             result = await workflow_env.client.execute_workflow(
                 AgentWorkflow.run,
@@ -105,7 +97,9 @@ class TestAgentWorkflowBasic:
             assert isinstance(result, str)
 
     @pytest.mark.asyncio
-    async def test_workflow_returns_mock_response(self, workflow_env: WorkflowEnvironment) -> None:
+    async def test_workflow_returns_mock_response(
+        self, workflow_env: WorkflowEnvironment, test_sandbox_runner: SandboxedWorkflowRunner
+    ) -> None:
         """Test that workflow returns the expected mock response."""
         input = AgentWorkflowInput(
             agent_name="TestAgent",
@@ -121,7 +115,7 @@ class TestAgentWorkflowBasic:
                 mock_tool_execution_activity,
                 mock_get_agent_config_activity,
             ],
-            workflow_runner=_create_sandbox_runner(),
+            workflow_runner=test_sandbox_runner,
         ):
             result = await workflow_env.client.execute_workflow(
                 AgentWorkflow.run,
@@ -140,7 +134,10 @@ class TestAgentWorkflowQueries:
 
     @pytest.mark.asyncio
     async def test_query_status_during_execution(
-        self, workflow_env: WorkflowEnvironment, simple_input: AgentWorkflowInput
+        self,
+        workflow_env: WorkflowEnvironment,
+        simple_input: AgentWorkflowInput,
+        test_sandbox_runner: SandboxedWorkflowRunner,
     ) -> None:
         """Test querying status while workflow runs."""
         async with Worker(
@@ -152,7 +149,7 @@ class TestAgentWorkflowQueries:
                 mock_tool_execution_activity,
                 mock_get_agent_config_activity,
             ],
-            workflow_runner=_create_sandbox_runner(),
+            workflow_runner=test_sandbox_runner,
         ):
             # Start workflow
             handle = await workflow_env.client.start_workflow(
@@ -171,7 +168,10 @@ class TestAgentWorkflowQueries:
 
     @pytest.mark.asyncio
     async def test_query_result_after_completion(
-        self, workflow_env: WorkflowEnvironment, simple_input: AgentWorkflowInput
+        self,
+        workflow_env: WorkflowEnvironment,
+        simple_input: AgentWorkflowInput,
+        test_sandbox_runner: SandboxedWorkflowRunner,
     ) -> None:
         """Test querying result after workflow completes."""
         async with Worker(
@@ -183,7 +183,7 @@ class TestAgentWorkflowQueries:
                 mock_tool_execution_activity,
                 mock_get_agent_config_activity,
             ],
-            workflow_runner=_create_sandbox_runner(),
+            workflow_runner=test_sandbox_runner,
         ):
             handle = await workflow_env.client.start_workflow(
                 AgentWorkflow.run,
@@ -200,7 +200,10 @@ class TestAgentWorkflowQueries:
 
     @pytest.mark.asyncio
     async def test_query_history_after_completion(
-        self, workflow_env: WorkflowEnvironment, simple_input: AgentWorkflowInput
+        self,
+        workflow_env: WorkflowEnvironment,
+        simple_input: AgentWorkflowInput,
+        test_sandbox_runner: SandboxedWorkflowRunner,
     ) -> None:
         """Test querying conversation history."""
         async with Worker(
@@ -212,7 +215,7 @@ class TestAgentWorkflowQueries:
                 mock_tool_execution_activity,
                 mock_get_agent_config_activity,
             ],
-            workflow_runner=_create_sandbox_runner(),
+            workflow_runner=test_sandbox_runner,
         ):
             handle = await workflow_env.client.start_workflow(
                 AgentWorkflow.run,
@@ -232,7 +235,10 @@ class TestAgentWorkflowQueries:
 
     @pytest.mark.asyncio
     async def test_query_iteration_count(
-        self, workflow_env: WorkflowEnvironment, simple_input: AgentWorkflowInput
+        self,
+        workflow_env: WorkflowEnvironment,
+        simple_input: AgentWorkflowInput,
+        test_sandbox_runner: SandboxedWorkflowRunner,
     ) -> None:
         """Test querying iteration count."""
         async with Worker(
@@ -244,7 +250,7 @@ class TestAgentWorkflowQueries:
                 mock_tool_execution_activity,
                 mock_get_agent_config_activity,
             ],
-            workflow_runner=_create_sandbox_runner(),
+            workflow_runner=test_sandbox_runner,
         ):
             handle = await workflow_env.client.start_workflow(
                 AgentWorkflow.run,
@@ -262,7 +268,10 @@ class TestAgentWorkflowQueries:
 
     @pytest.mark.asyncio
     async def test_query_error_when_no_error(
-        self, workflow_env: WorkflowEnvironment, simple_input: AgentWorkflowInput
+        self,
+        workflow_env: WorkflowEnvironment,
+        simple_input: AgentWorkflowInput,
+        test_sandbox_runner: SandboxedWorkflowRunner,
     ) -> None:
         """Test that error query returns None when no error."""
         async with Worker(
@@ -274,7 +283,7 @@ class TestAgentWorkflowQueries:
                 mock_tool_execution_activity,
                 mock_get_agent_config_activity,
             ],
-            workflow_runner=_create_sandbox_runner(),
+            workflow_runner=test_sandbox_runner,
         ):
             handle = await workflow_env.client.start_workflow(
                 AgentWorkflow.run,
@@ -290,7 +299,10 @@ class TestAgentWorkflowQueries:
 
     @pytest.mark.asyncio
     async def test_query_sub_agent_conversations_empty(
-        self, workflow_env: WorkflowEnvironment, simple_input: AgentWorkflowInput
+        self,
+        workflow_env: WorkflowEnvironment,
+        simple_input: AgentWorkflowInput,
+        test_sandbox_runner: SandboxedWorkflowRunner,
     ) -> None:
         """Test querying sub-agent conversations when none exist."""
         async with Worker(
@@ -302,7 +314,7 @@ class TestAgentWorkflowQueries:
                 mock_tool_execution_activity,
                 mock_get_agent_config_activity,
             ],
-            workflow_runner=_create_sandbox_runner(),
+            workflow_runner=test_sandbox_runner,
         ):
             handle = await workflow_env.client.start_workflow(
                 AgentWorkflow.run,
@@ -321,7 +333,9 @@ class TestAgentWorkflowContinueAsNew:
     """Tests for workflow continue-as-new with state restoration."""
 
     @pytest.mark.asyncio
-    async def test_workflow_restores_state(self, workflow_env: WorkflowEnvironment) -> None:
+    async def test_workflow_restores_state(
+        self, workflow_env: WorkflowEnvironment, test_sandbox_runner: SandboxedWorkflowRunner
+    ) -> None:
         """Test that workflow correctly restores state from input."""
         # Create input with existing state
         input = AgentWorkflowInput(
@@ -349,7 +363,7 @@ class TestAgentWorkflowContinueAsNew:
                 mock_tool_execution_activity,
                 mock_get_agent_config_activity,
             ],
-            workflow_runner=_create_sandbox_runner(),
+            workflow_runner=test_sandbox_runner,
         ):
             handle = await workflow_env.client.start_workflow(
                 AgentWorkflow.run,
@@ -371,7 +385,9 @@ class TestAgentWorkflowSignals:
     """Tests for AgentWorkflow signal handling."""
 
     @pytest.mark.asyncio
-    async def test_signal_add_message(self, workflow_env: WorkflowEnvironment) -> None:
+    async def test_signal_add_message(
+        self, workflow_env: WorkflowEnvironment, test_sandbox_runner: SandboxedWorkflowRunner
+    ) -> None:
         """Test that add_message signal adds to pending messages."""
         # Note: This test validates signals work at the Temporal level
         # The full integration with follow-up would require more complex setup
@@ -389,7 +405,7 @@ class TestAgentWorkflowSignals:
                 mock_tool_execution_activity,
                 mock_get_agent_config_activity,
             ],
-            workflow_runner=_create_sandbox_runner(),
+            workflow_runner=test_sandbox_runner,
         ):
             handle = await workflow_env.client.start_workflow(
                 AgentWorkflow.run,
@@ -411,7 +427,7 @@ class TestAgentWorkflowWithParent:
 
     @pytest.mark.asyncio
     async def test_child_workflow_receives_parent_id(
-        self, workflow_env: WorkflowEnvironment
+        self, workflow_env: WorkflowEnvironment, test_sandbox_runner: SandboxedWorkflowRunner
     ) -> None:
         """Test that child workflow input includes parent workflow ID."""
         input = AgentWorkflowInput(
@@ -429,7 +445,7 @@ class TestAgentWorkflowWithParent:
                 mock_tool_execution_activity,
                 mock_get_agent_config_activity,
             ],
-            workflow_runner=_create_sandbox_runner(),
+            workflow_runner=test_sandbox_runner,
         ):
             handle = await workflow_env.client.start_workflow(
                 AgentWorkflow.run,
@@ -507,7 +523,9 @@ class TestAgentWorkflowParallelToolCalls:
     """Tests for parallel tool call execution."""
 
     @pytest.mark.asyncio
-    async def test_mcp_tools_run_in_parallel(self, workflow_env: WorkflowEnvironment) -> None:
+    async def test_mcp_tools_run_in_parallel(
+        self, workflow_env: WorkflowEnvironment, test_sandbox_runner: SandboxedWorkflowRunner
+    ) -> None:
         """Test that multiple MCP tool calls execute in parallel."""
         import time
 
@@ -568,7 +586,7 @@ class TestAgentWorkflowParallelToolCalls:
                 tracking_tool_activity,
                 config_activity,
             ],
-            workflow_runner=_create_sandbox_runner(),
+            workflow_runner=test_sandbox_runner,
         ):
             start_time = time.time()
             await workflow_env.client.execute_workflow(
@@ -593,7 +611,9 @@ class TestAgentWorkflowParallelToolCalls:
             assert time_spread < 0.05, f"Tools didn't start together: {time_spread}s"
 
     @pytest.mark.asyncio
-    async def test_tool_results_preserve_order(self, workflow_env: WorkflowEnvironment) -> None:
+    async def test_tool_results_preserve_order(
+        self, workflow_env: WorkflowEnvironment, test_sandbox_runner: SandboxedWorkflowRunner
+    ) -> None:
         """Test that tool results are added to history in correct order."""
 
         @activity.defn(name="inference_activity")
@@ -648,7 +668,7 @@ class TestAgentWorkflowParallelToolCalls:
                 tool_with_name_result,
                 config_activity,
             ],
-            workflow_runner=_create_sandbox_runner(),
+            workflow_runner=test_sandbox_runner,
         ):
             handle = await workflow_env.client.start_workflow(
                 AgentWorkflow.run,
@@ -673,7 +693,9 @@ class TestAgentWorkflowParallelToolCalls:
             assert tool_messages[2]["content"] == "Result:third"
 
     @pytest.mark.asyncio
-    async def test_tool_error_handling_in_parallel(self, workflow_env: WorkflowEnvironment) -> None:
+    async def test_tool_error_handling_in_parallel(
+        self, workflow_env: WorkflowEnvironment, test_sandbox_runner: SandboxedWorkflowRunner
+    ) -> None:
         """Test that tool errors don't prevent other tools from completing."""
 
         @activity.defn(name="inference_activity")
@@ -725,7 +747,7 @@ class TestAgentWorkflowParallelToolCalls:
                 mixed_tool_activity,
                 config_activity,
             ],
-            workflow_runner=_create_sandbox_runner(),
+            workflow_runner=test_sandbox_runner,
         ):
             handle = await workflow_env.client.start_workflow(
                 AgentWorkflow.run,
@@ -754,7 +776,10 @@ class TestAgentWorkflowApproval:
 
     @pytest.mark.asyncio
     async def test_query_pending_approvals_empty(
-        self, workflow_env: WorkflowEnvironment, simple_input: AgentWorkflowInput
+        self,
+        workflow_env: WorkflowEnvironment,
+        simple_input: AgentWorkflowInput,
+        test_sandbox_runner: SandboxedWorkflowRunner,
     ) -> None:
         """Test get_pending_approvals returns empty list initially."""
         async with Worker(
@@ -766,7 +791,7 @@ class TestAgentWorkflowApproval:
                 mock_tool_execution_activity,
                 mock_get_agent_config_activity,
             ],
-            workflow_runner=_create_sandbox_runner(),
+            workflow_runner=test_sandbox_runner,
         ):
             handle = await workflow_env.client.start_workflow(
                 AgentWorkflow.run,
@@ -781,7 +806,9 @@ class TestAgentWorkflowApproval:
             assert pending == []
 
     @pytest.mark.asyncio
-    async def test_approval_workflow_timeout(self, workflow_env: WorkflowEnvironment) -> None:
+    async def test_approval_workflow_timeout(
+        self, workflow_env: WorkflowEnvironment, test_sandbox_runner: SandboxedWorkflowRunner
+    ) -> None:
         """Test that approval timeout auto-rejects the tool call."""
         from datetime import timedelta
 
@@ -841,7 +868,7 @@ class TestAgentWorkflowApproval:
                 tool_activity,
                 config_activity,
             ],
-            workflow_runner=_create_sandbox_runner(),
+            workflow_runner=test_sandbox_runner,
         ):
             handle = await workflow_env.client.start_workflow(
                 AgentWorkflow.run,
@@ -862,7 +889,7 @@ class TestAgentWorkflowApproval:
 
     @pytest.mark.asyncio
     async def test_tools_without_approval_rules_run_parallel(
-        self, workflow_env: WorkflowEnvironment
+        self, workflow_env: WorkflowEnvironment, test_sandbox_runner: SandboxedWorkflowRunner
     ) -> None:
         """Test that tools run in parallel when no approval rules are set."""
         import time
@@ -920,7 +947,7 @@ class TestAgentWorkflowApproval:
                 tracking_tool_activity,
                 config_activity,
             ],
-            workflow_runner=_create_sandbox_runner(),
+            workflow_runner=test_sandbox_runner,
         ):
             await workflow_env.client.execute_workflow(
                 AgentWorkflow.run,

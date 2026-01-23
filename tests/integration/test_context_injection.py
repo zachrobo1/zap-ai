@@ -22,7 +22,6 @@ from temporalio.client import Client as TemporalClient
 from temporalio.worker import Worker
 from temporalio.worker.workflow_sandbox import (
     SandboxedWorkflowRunner,
-    SandboxRestrictions,
 )
 
 from zap_ai import Zap, ZapAgent
@@ -31,17 +30,6 @@ from zap_ai.activities.inference import InferenceInput
 from zap_ai.activities.tool_execution import AgentConfigOutput
 from zap_ai.mcp.context import get_zap_context, get_zap_context_value
 from zap_ai.workflows import AgentWorkflow
-
-
-def _create_sandbox_runner() -> SandboxedWorkflowRunner:
-    """Create a sandbox runner with passthrough modules for beartype/fastmcp."""
-    return SandboxedWorkflowRunner(
-        restrictions=SandboxRestrictions.default.with_passthrough_modules(
-            "beartype",
-            "fastmcp",
-        )
-    )
-
 
 # =============================================================================
 # FastMCP Server Tests - Direct context injection via meta parameter
@@ -290,6 +278,7 @@ async def mock_get_agent_config_with_tools(agent_name: str) -> AgentConfigOutput
 @pytest.fixture
 async def context_workflow_worker(
     temporal_client: TemporalClient,
+    test_sandbox_runner: SandboxedWorkflowRunner,
 ) -> AsyncGenerator[Worker, None]:
     """Create a worker for context injection workflow testing."""
     task_queue = f"integration-test-context-{uuid.uuid4().hex[:8]}"
@@ -303,7 +292,7 @@ async def context_workflow_worker(
             mock_tool_execution_with_context_capture,
             mock_get_agent_config_with_tools,
         ],
-        workflow_runner=_create_sandbox_runner(),
+        workflow_runner=test_sandbox_runner,
     )
 
     _captured_workflow_contexts.clear()
@@ -603,6 +592,7 @@ class TestRealMCPContextInjection:
     async def test_pydantic_context_through_real_mcp_server(
         self,
         temporal_client: TemporalClient,
+        test_sandbox_runner: SandboxedWorkflowRunner,
     ) -> None:
         """Test Pydantic context flows through real Zap system to real MCP tools.
 
@@ -697,7 +687,7 @@ class TestRealMCPContextInjection:
                     tool_execution_activity,  # Real - calls actual MCP server
                     get_agent_config_activity,  # Real - gets tools from registry
                 ],
-                workflow_runner=_create_sandbox_runner(),
+                workflow_runner=test_sandbox_runner,
             )
 
             async with worker:

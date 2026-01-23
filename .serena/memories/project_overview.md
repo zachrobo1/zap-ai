@@ -83,8 +83,9 @@ src/zap_ai/
 │   ├── noop_provider.py # No-op fallback
 │   └── langfuse_provider.py # Langfuse implementation
 └── worker/             # Worker process for running workflows
-    ├── __init__.py
+    ├── __init__.py     # Public API (create_worker, run_worker, run_worker_with_zap, create_production_runner, production_restrictions)
     ├── worker.py       # Worker creation functions (run_worker)
+    ├── sandbox.py      # Temporal sandbox configuration (factory functions, restrictions)
     └── __main__.py     # CLI entry point (python -m zap_ai.worker)
 ```
 

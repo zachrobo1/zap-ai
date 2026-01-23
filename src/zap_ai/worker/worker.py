@@ -11,10 +11,6 @@ from typing import TYPE_CHECKING, Any
 
 from temporalio.client import Client
 from temporalio.worker import Worker
-from temporalio.worker.workflow_sandbox import (
-    SandboxedWorkflowRunner,
-    SandboxRestrictions,
-)
 
 from zap_ai.activities.inference import inference_activity
 from zap_ai.activities.tool_execution import (
@@ -23,23 +19,11 @@ from zap_ai.activities.tool_execution import (
     tool_execution_activity,
 )
 from zap_ai.tracing import TracingProvider, set_tracing_provider
+from zap_ai.worker.sandbox import create_production_runner
 from zap_ai.workflows.agent_workflow import AgentWorkflow
 
 if TYPE_CHECKING:
     from zap_ai.core.zap import Zap
-
-
-# Configure sandbox to pass through problematic modules
-# beartype causes circular import issues in the sandbox
-# httpx uses urllib.request.Request which is restricted in the sandbox
-# litellm uses thread-local objects which conflict with sandbox restrictions
-# beartype causes circular import issues in the sandbox
-_SANDBOX_RESTRICTIONS = SandboxRestrictions.default.with_passthrough_modules(
-    "beartype",
-    "httpx",
-    "litellm",
-    "urllib",
-)
 
 
 async def create_worker(
@@ -91,7 +75,7 @@ async def create_worker(
             tool_execution_activity,
             get_agent_config_activity,
         ],
-        workflow_runner=SandboxedWorkflowRunner(restrictions=_SANDBOX_RESTRICTIONS),
+        workflow_runner=create_production_runner(),
     )
 
 

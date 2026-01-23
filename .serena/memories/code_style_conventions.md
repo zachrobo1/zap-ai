@@ -120,3 +120,40 @@ class ToolNotFoundError(Exception):  # Don't do this
 - **Conversation parsing** in `conversation/` module (not in Task class)
 - **Shared utilities** (like `parse_tool_arguments`) in `utils.py`
 - Business logic classes delegate to extracted functions for complex operations
+
+## Configuration Patterns
+
+### Factory Functions for Reusable Configuration
+When configuration code is duplicated, use factory functions:
+- **Production code**: Create factory functions in dedicated modules (e.g., `sandbox.py`)
+- **Test code**: Use pytest fixtures in `conftest.py`
+- **Avoid premature abstraction**: Only export what's actually used (YAGNI principle)
+
+Example - Temporal Sandbox Configuration:
+```python
+# src/zap_ai/worker/sandbox.py - Factory functions for production
+production_restrictions = SandboxRestrictions.default.with_passthrough_modules(
+    "beartype", "httpx", "litellm", "urllib"
+)
+
+def create_production_runner() -> SandboxedWorkflowRunner:
+    """Create sandbox runner for production environments."""
+    return SandboxedWorkflowRunner(restrictions=production_restrictions)
+
+# tests/conftest.py - Pytest fixture for tests
+@pytest.fixture
+def test_sandbox_runner() -> SandboxedWorkflowRunner:
+    """Create a sandbox runner configured for testing."""
+    return SandboxedWorkflowRunner(
+        restrictions=SandboxRestrictions.default.with_passthrough_modules(
+            "beartype", "fastmcp"
+        )
+    )
+```
+
+### Benefits of Factory Pattern
+- **Single source of truth** - Configuration defined once
+- **DRY principle** - No duplicate code across files
+- **Clear documentation** - Docstrings explain why modules need passthrough
+- **Easy maintenance** - Changes happen in one place
+- **Idiomatic** - Factories for src/, fixtures for tests/

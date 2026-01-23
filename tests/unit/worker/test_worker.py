@@ -6,23 +6,12 @@ from temporalio.testing import WorkflowEnvironment
 from temporalio.worker import Worker
 from temporalio.worker.workflow_sandbox import (
     SandboxedWorkflowRunner,
-    SandboxRestrictions,
 )
 
 from zap_ai.activities import InferenceInput, InferenceOutput, ToolExecutionInput
 from zap_ai.activities.tool_execution import AgentConfigOutput
 from zap_ai.worker import create_worker, run_worker_with_zap
 from zap_ai.workflows import AgentWorkflow, AgentWorkflowInput
-
-
-def _create_sandbox_runner() -> SandboxedWorkflowRunner:
-    """Create a sandbox runner with passthrough modules for beartype/fastmcp."""
-    return SandboxedWorkflowRunner(
-        restrictions=SandboxRestrictions.default.with_passthrough_modules(
-            "beartype",
-            "fastmcp",
-        )
-    )
 
 
 # Mock activities for testing
@@ -85,7 +74,9 @@ class TestWorkerExecutesWorkflows:
     """Tests for worker executing workflows."""
 
     @pytest.mark.asyncio
-    async def test_worker_executes_workflow_with_mocks(self) -> None:
+    async def test_worker_executes_workflow_with_mocks(
+        self, test_sandbox_runner: SandboxedWorkflowRunner
+    ) -> None:
         """Test that worker can execute workflow with mock activities."""
         async with await WorkflowEnvironment.start_time_skipping() as env:
             async with Worker(
@@ -97,7 +88,7 @@ class TestWorkerExecutesWorkflows:
                     mock_tool_execution_activity,
                     mock_get_agent_config_activity,
                 ],
-                workflow_runner=_create_sandbox_runner(),
+                workflow_runner=test_sandbox_runner,
             ):
                 result = await env.client.execute_workflow(
                     AgentWorkflow.run,
@@ -110,7 +101,9 @@ class TestWorkerExecutesWorkflows:
                 assert "Mock response to:" in result
 
     @pytest.mark.asyncio
-    async def test_worker_handles_multiple_workflows(self) -> None:
+    async def test_worker_handles_multiple_workflows(
+        self, test_sandbox_runner: SandboxedWorkflowRunner
+    ) -> None:
         """Test that worker can handle multiple concurrent workflows."""
         async with await WorkflowEnvironment.start_time_skipping() as env:
             async with Worker(
@@ -122,7 +115,7 @@ class TestWorkerExecutesWorkflows:
                     mock_tool_execution_activity,
                     mock_get_agent_config_activity,
                 ],
-                workflow_runner=_create_sandbox_runner(),
+                workflow_runner=test_sandbox_runner,
             ):
                 # Start multiple workflows
                 handles = []
@@ -146,7 +139,9 @@ class TestWorkerExecutesWorkflows:
                     assert "Mock response to:" in result
 
     @pytest.mark.asyncio
-    async def test_created_worker_executes_workflow(self) -> None:
+    async def test_created_worker_executes_workflow(
+        self, test_sandbox_runner: SandboxedWorkflowRunner
+    ) -> None:
         """Test that worker from create_worker can be started."""
         async with await WorkflowEnvironment.start_time_skipping() as env:
             # create_worker registers real activities, but we need mock activities for testing
@@ -160,7 +155,7 @@ class TestWorkerExecutesWorkflows:
                     mock_tool_execution_activity,
                     mock_get_agent_config_activity,
                 ],
-                workflow_runner=_create_sandbox_runner(),
+                workflow_runner=test_sandbox_runner,
             ):
                 result = await env.client.execute_workflow(
                     AgentWorkflow.run,
